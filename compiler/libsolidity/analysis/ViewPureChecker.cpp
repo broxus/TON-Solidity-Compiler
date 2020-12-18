@@ -274,6 +274,7 @@ void ViewPureChecker::endVisit(MemberAccess const& _memberAccess)
 			{MagicType::Kind::MetaType, "creationCode"},
 			{MagicType::Kind::MetaType, "name"},
 			{MagicType::Kind::MetaType, "runtimeCode"},
+			{MagicType::Kind::MetaType, "makeAddr"},
 			{MagicType::Kind::Transaction, "timestamp"},
 			{MagicType::Kind::TVM, "accept"},
 			{MagicType::Kind::TVM, "checkSign"},

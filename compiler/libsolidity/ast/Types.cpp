@@ -2953,6 +2953,7 @@ string FunctionType::richIdentifier() const
 	case Kind::ABIEncodeWithSignature: id += "abiencodewithsignature"; break;
 	case Kind::ABIDecode: id += "abidecode"; break;
 	case Kind::MetaType: id += "metatype"; break;
+	case Kind::TypeMakeAddr: id += "typemakeaddr"; break;
 
 	case Kind::RndGetSeed: id += "rndgetseed"; break;
 	case Kind::RndNext: id += "rndnext"; break;
@@ -3460,7 +3461,8 @@ bool FunctionType::isPure() const
 		m_kind == Kind::ABIEncodeWithSelector ||
 		m_kind == Kind::ABIEncodeWithSignature ||
 		m_kind == Kind::ABIDecode ||
-		m_kind == Kind::MetaType;
+		m_kind == Kind::MetaType ||
+		m_kind == Kind::TypeMakeAddr;
 }
 
 TypePointers FunctionType::parseElementaryTypeVector(strings const& _types)
@@ -4247,6 +4249,19 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				{"creationCode", TypeProvider::array(DataLocation::Memory)},
 				{"runtimeCode", TypeProvider::array(DataLocation::Memory)},
 				{"name", TypeProvider::stringMemory()},
+				{"makeAddr", TypeProvider::function(
+						TypePointers{
+							TypeProvider::integer(8, IntegerType::Modifier::Signed),
+							TypeProvider::tvmcell(),
+							TypeProvider::uint256(),
+							TypeProvider::optionValue()
+						},
+						TypePointers{TypeProvider::address()},
+						strings{string("wid"), string("code"), string("pubkey"), string("varInit")},
+						strings{string()},
+						FunctionType::Kind::TypeMakeAddr,
+						false, StateMutability::Pure
+				)}
 			});
 		else
 			return {};

@@ -71,7 +71,10 @@ void FunctionCallCompiler::compile() {
 	} else {
 		if (ma != nullptr) {
 			auto category = getType(&ma->expression())->category();
+
 			auto ident = to<Identifier>(&ma->expression());
+			auto meta_type = to<FunctionCall>(&ma->expression());
+
 			if (category == Type::Category::Array) {
 				arrayMethods(*ma);
 			} else if (category == Type::Category::TvmSlice) {
@@ -95,6 +98,8 @@ void FunctionCallCompiler::compile() {
 				msgFunction(*ma);
 			} else if (category == Type::Category::Magic && ident != nullptr && ident->name() == "math") {
 				mathFunction(*ma);
+			} else if (category == Type::Category::Magic && meta_type != nullptr && meta_type->arguments().size() == 1) {
+				contractHelperFunction(*ma, *meta_type);
 			} else if (category == Type::Category::Address) {
 				addressMethod();
 			} else if (category == Type::Category::TvmCell) {
@@ -107,7 +112,8 @@ void FunctionCallCompiler::compile() {
 				} else {
 					typeTypeMethods(*ma);
 				}
-			} else {
+			}
+			else {
 				cast_error(m_functionCall, "Unsupported function call");
 			}
 		}
@@ -1230,6 +1236,18 @@ void FunctionCallCompiler::mathFunction(const MemberAccess &_node) {
 	}
 }
 
+void FunctionCallCompiler::contractHelperFunction(MemberAccess const& _node, FunctionCall const& typeMeta) {
+	auto const* magicType = to<MagicType>(typeMeta.annotation().type);
+
+	if (_node.memberName() == "makeAddr" && magicType != nullptr) {
+		auto const& contract = dynamic_cast<ContractType const&>(*magicType->typeArgument()).contractDefinition();
+
+		computeContractAddr(contract);
+	} else {
+		cast_error(m_functionCall, "Unsupported function call");
+	}
+}
+
 bool FunctionCallCompiler::checkBaseContractCall(MemberAccess const &_node, Type::Category category) {
 	if (category != Type::Category::TypeType)
 		return false;
@@ -1883,6 +1901,113 @@ SWAP
 		return false;
 	}
 	return true;
+}
+
+void FunctionCallCompiler::computeContractAddr(ContractDefinition const& contract) {
+	const auto arguments = m_functionCall.arguments();
+	const auto optionNames = m_functionCall.names();
+
+	std::map<int, std::function<void()>> exprs;
+
+	auto codeIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "code"; });
+	if (codeIt != optionNames.end()) {
+		const int ss = m_pusher.getStack().size();
+
+		// _ split_depth:(Maybe (## 5)) special:(Maybe TickTock)
+		// code:(Maybe ^Cell) data:(Maybe ^Cell)
+		// library:(HashmapE 256 SimpleLib) = StateInit;
+
+		// creat dict with variable values
+		m_pusher.push(+1, "NEWDICT");
+		// stake: builder dict
+
+		IntegerType keyType = getKeyTypeOfC4();
+		TypePointer valueType = TypeProvider::uint256();
+
+		auto pubkeyIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "pubkey"; });
+		if (pubkeyIt == optionNames.end()) {
+			m_pusher.pushInt(0);
+		} else {
+			size_t pkIndex = pubkeyIt - optionNames.begin();
+			acceptExpr(arguments.at(pkIndex).get());
+		}
+		bool isValueBuilder = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
+		m_pusher.pushInt(0); // index of pubkey
+		// stack: dict value key
+		m_pusher.push(0, "ROT");
+		// stack: value key dict
+		m_pusher.setDict(getKeyTypeOfC4(), *valueType, isValueBuilder, m_functionCall);
+		// stack: dict'
+
+		auto varIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "varInit"; });
+		if (varIt != optionNames.end()) {
+			size_t initVarsIndex = varIt - optionNames.begin();
+			auto initVars =  to<InitializerList>(arguments.at(initVarsIndex).get());
+			for (size_t i = 0; i < initVars->names().size(); ++i) {
+				const ASTPointer<ASTString> & name = initVars->names().at(i);
+				std::vector<PragmaDirective const *> _pragmaDirectives;
+				PragmaDirectiveHelper pragmaHelper{_pragmaDirectives};
+				TVMCompilerContext cc{&contract, pragmaHelper};
+				auto const &[varDecl, varIndex] = cc.getStateVarInfo(*name);
+
+				valueType = varDecl->type();
+				acceptExpr(initVars->options().at(i).get());
+				isValueBuilder = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
+				m_pusher.pushInt(varIndex - 9);
+				// stack: dict value key
+				m_pusher.push(0, "ROT");
+				// stack: value key dict
+				StackPusherHelper sp{&cc, m_pusher.getStack().size()};
+				sp.setDict(getKeyTypeOfC4(), *varDecl->type(), isValueBuilder, *initVars->options().at(i));
+				m_pusher.append(sp.code());
+				m_pusher.push(-2, ""); // fix stack
+				// stack: dict'
+			}
+		}
+		m_pusher.push(+1, "NEWC");
+		m_pusher.push(-2 + 1, "STDICT");
+		m_pusher.push(-1 + 1, "ENDC");
+
+
+		// stack: data
+		size_t codeIndex = codeIt - optionNames.begin();
+		acceptExpr(arguments.at(codeIndex).get());
+
+		// stake: data code
+		m_pusher.push(+1, "NEWC");
+		m_pusher.push(-1 + 1, "STSLICECONST x2_"); // no split_depth and no special // 0 0
+		// stake: data code builder
+		m_pusher.push(-2 + 1, "STOPTREF"); // store code
+		m_pusher.push(-2 + 1, "STOPTREF"); // store data
+		m_pusher.push(0, "STZERO"); // store library
+		m_pusher.push(0, "ENDC");
+		// stack: stateInit
+		solAssert(ss + 1 == m_pusher.getStack().size(), "");
+	} else {
+		solUnimplemented("");
+	}
+
+	// stack: stateInit
+	m_pusher.pushS(0);
+	m_pusher.push(-1 + 1, "HASHCU"); // stack: stateInit hash
+
+	auto widIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "wid"; });
+	if (widIt != optionNames.end()) {
+		size_t widIndex = widIt - optionNames.begin();
+		acceptExpr(arguments[widIndex].get()); // stack: stateInit hash wid
+		m_pusher.push(+1, "NEWC");
+		m_pusher.push(-1 + 1, "STSLICECONST x9_"); // addr_std$10 anycast:(Maybe Anycast) // 10 0 1 = 9
+		m_pusher.push(-1, "STI 8"); // workchain_id:int8
+	} else {
+		m_pusher.push(+1, "NEWC");
+		m_pusher.push(-1 + 1, "STSLICECONST x801_"); // addr_std$10 anycast:(Maybe Anycast) workchain_id:int8 // 10 0  00000000 1 = 801
+	}
+	m_pusher.push(-1, "STU 256"); // address:bits256
+	m_pusher.push(-1 + 1, "ENDC");
+	m_pusher.push(-1 + 1, "CTOS");
+
+	// stack: stateInit destAddress
+	m_pusher.dropUnder(1, 1);
 }
 
 bool FunctionCallCompiler::createNewContract() {

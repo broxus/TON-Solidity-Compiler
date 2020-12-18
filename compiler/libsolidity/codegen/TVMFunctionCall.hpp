@@ -58,6 +58,7 @@ protected:
 	void rndFunction(MemberAccess const& _node);
 	bool checkForTvmFunction(MemberAccess const& _node);
 	void mathFunction(MemberAccess const& _node);
+	void contractHelperFunction(MemberAccess const& _node, FunctionCall const& typeMeta);
 	bool checkBaseContractCall(MemberAccess const& _node, Type::Category category);
 	bool checkAddressThis();
 	void typeConversion();
@@ -65,6 +66,7 @@ protected:
 	bool checkSolidityUnits();
 	bool checkForIdentifier();
 	bool checkNewExpression();
+	void computeContractAddr(ContractDefinition const& contract);
 	bool createNewContract();
 	bool checkTvmIntrinsic();
 };

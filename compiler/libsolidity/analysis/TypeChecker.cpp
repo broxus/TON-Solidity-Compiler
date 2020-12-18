@@ -2859,7 +2859,7 @@ bool TypeChecker::visit(MemberAccess const& _memberAccess)
 		if (magicType->kind() == MagicType::Kind::ABI)
 			annotation.isPure = true;
 		else if (magicType->kind() == MagicType::Kind::MetaType && (
-			memberName == "creationCode" || memberName == "runtimeCode"
+			memberName == "creationCode" || memberName == "runtimeCode" || memberName == "makeAddr"
 		))
 		{
 			annotation.isPure = true;
