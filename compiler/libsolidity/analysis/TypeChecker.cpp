@@ -2863,9 +2863,19 @@ bool TypeChecker::visit(MemberAccess const& _memberAccess)
 		))
 		{
 			annotation.isPure = true;
-			m_scope->annotation().contractDependencies.insert(
-				&dynamic_cast<ContractType const&>(*magicType->typeArgument()).contractDefinition()
-			);
+			const auto* contractDefinition = &dynamic_cast<ContractType const&>(*magicType->typeArgument()).contractDefinition();
+
+			if (m_scope == contractDefinition) {
+				return false;
+			}
+
+			for (const auto& contract : m_scope->baseContracts()) {
+				if (contract->name().annotation().contractScope == contractDefinition) {
+					return false;
+				}
+			}
+
+			m_scope->annotation().contractDependencies.insert(contractDefinition);
 			if (contractDependenciesAreCyclic(*m_scope))
 				m_errorReporter.typeError(
 					_memberAccess.location(),
