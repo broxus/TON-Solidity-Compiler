@@ -1824,80 +1824,87 @@ void FunctionCallCompiler::computeContractAddr(ContractDefinition const& contrac
 	const auto arguments = m_functionCall.arguments();
 	const auto optionNames = m_functionCall.names();
 
-	std::map<int, std::function<void()>> exprs;
+	std::vector<PragmaDirective const *> _pragmaDirectives;
+	PragmaDirectiveHelper pragmaHelper{_pragmaDirectives};
+	TVMCompilerContext cc{&contract, pragmaHelper};
+	std::vector<std::pair<VariableDeclaration const*, int>> staticVars = cc.getStaticVaribles();
+	auto getDeclAndIndex = [&](const std::string& name) {
+		auto pos = find_if(staticVars.begin(), staticVars.end(), [&](auto v) { return v.first->name() == name; });
+		solAssert(pos != staticVars.end(), "");
+		return *pos;
+	};
 
 	auto codeIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "code"; });
 	if (codeIt != optionNames.end()) {
 		const int ss = m_pusher.getStack().size();
+		std::map<StateInitMembers, std::function<void()>> stateInitExprs;
 
-		// _ split_depth:(Maybe (## 5)) special:(Maybe TickTock)
-		// code:(Maybe ^Cell) data:(Maybe ^Cell)
-		// library:(HashmapE 256 SimpleLib) = StateInit;
+		stateInitExprs[StateInitMembers::Data] = [&]() {
+			// creat dict with variable values
+			m_pusher.push(+1, "NEWDICT");
+			// stake: builder dict
 
-		// creat dict with variable values
-		m_pusher.push(+1, "NEWDICT");
-		// stake: builder dict
+			IntegerType keyType = getKeyTypeOfC4();
+			TypePointer valueType = TypeProvider::uint256();
 
-		IntegerType keyType = getKeyTypeOfC4();
-		TypePointer valueType = TypeProvider::uint256();
-
-		auto pubkeyIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "pubkey"; });
-		if (pubkeyIt == optionNames.end()) {
-			m_pusher.pushInt(0);
-		} else {
-			size_t pkIndex = pubkeyIt - optionNames.begin();
-			acceptExpr(arguments.at(pkIndex).get());
-		}
-		bool isValueBuilder = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
-		m_pusher.pushInt(0); // index of pubkey
-		// stack: dict value key
-		m_pusher.push(0, "ROT");
-		// stack: value key dict
-		m_pusher.setDict(getKeyTypeOfC4(), *valueType, isValueBuilder, m_functionCall);
-		// stack: dict'
-
-		auto varIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "varInit"; });
-		if (varIt != optionNames.end()) {
-			size_t initVarsIndex = varIt - optionNames.begin();
-			auto initVars =  to<InitializerList>(arguments.at(initVarsIndex).get());
-			for (size_t i = 0; i < initVars->names().size(); ++i) {
-				const ASTPointer<ASTString> & name = initVars->names().at(i);
-				std::vector<PragmaDirective const *> _pragmaDirectives;
-				PragmaDirectiveHelper pragmaHelper{_pragmaDirectives};
-				TVMCompilerContext cc{&contract, pragmaHelper};
-				auto const &[varDecl, varIndex] = cc.getStateVarInfo(*name);
-
-				valueType = varDecl->type();
-				acceptExpr(initVars->options().at(i).get());
-				isValueBuilder = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
-				m_pusher.pushInt(varIndex - 9);
-				// stack: dict value key
-				m_pusher.push(0, "ROT");
-				// stack: value key dict
-				StackPusherHelper sp{&cc, m_pusher.getStack().size()};
-				sp.setDict(getKeyTypeOfC4(), *varDecl->type(), isValueBuilder, *initVars->options().at(i));
-				m_pusher.append(sp.code());
-				m_pusher.push(-2, ""); // fix stack
-				// stack: dict'
+			auto pubkeyIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "pubkey"; });
+			if (pubkeyIt == optionNames.end()) {
+				m_pusher.pushInt(0);
+			} else {
+				size_t pkIndex = pubkeyIt - optionNames.begin();
+				acceptExpr(arguments.at(pkIndex).get());
 			}
+			const DataType& dataType = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
+			m_pusher.pushInt(0); // index of pubkey
+			// stack: dict value key
+			m_pusher.push(0, "ROT");
+			// stack: value key dict
+			m_pusher.setDict(getKeyTypeOfC4(), *valueType, dataType);
+			// stack: dict'
+
+			auto varIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "varInit"; });
+			if (varIt != optionNames.end()) {
+				size_t initVarsIndex = varIt - optionNames.begin();
+				auto initVars = to<InitializerList>(arguments.at(initVarsIndex).get());
+				for (size_t i = 0; i < initVars->names().size(); ++i) {
+					const ASTPointer<ASTString> &name = initVars->names().at(i);
+
+
+					const auto &[varDecl, varIndex] = getDeclAndIndex(*name);
+					valueType = varDecl->type();
+					acceptExpr(initVars->options().at(i).get());
+					const DataType& dataType2 = m_pusher.prepareValueForDictOperations(&keyType, valueType, false);
+					m_pusher.pushInt(varIndex);
+					// stack: dict value key
+					m_pusher.push(0, "ROT");
+					// stack: value key dict
+					StackPusherHelper sp{&cc, m_pusher.getStack().size()};
+					sp.setDict(getKeyTypeOfC4(), *varDecl->type(), dataType2);
+					m_pusher.append(sp.code());
+					m_pusher.push(-2, ""); // fix stack
+					// stack: dict'
+				}
+			}
+			m_pusher.push(+1, "NEWC");
+			m_pusher.push(-2 + 1, "STDICT");
+			m_pusher.push(-1 + 1, "ENDC");
+		};
+
+		stateInitExprs[StateInitMembers::Code] = [&]() {
+			size_t codeIndex = codeIt - optionNames.begin();
+			acceptExpr(arguments.at(codeIndex).get());
+		};
+
+		auto splitDepthIt = find_if(optionNames.begin(), optionNames.end(), [](auto el) { return *el == "splitDepth"; });
+		if (splitDepthIt != optionNames.end()) {
+			stateInitExprs[StateInitMembers::SplitDepth] = [&]() {
+				size_t splitDepthIndex = splitDepthIt - optionNames.begin();
+				acceptExpr(arguments[splitDepthIndex].get()); // stack: data code split_depth
+			};
 		}
-		m_pusher.push(+1, "NEWC");
-		m_pusher.push(-2 + 1, "STDICT");
-		m_pusher.push(-1 + 1, "ENDC");
 
+		buildStateInit(stateInitExprs);
 
-		// stack: data
-		size_t codeIndex = codeIt - optionNames.begin();
-		acceptExpr(arguments.at(codeIndex).get());
-
-		// stake: data code
-		m_pusher.push(+1, "NEWC");
-		m_pusher.push(-1 + 1, "STSLICECONST x2_"); // no split_depth and no special // 0 0
-		// stake: data code builder
-		m_pusher.push(-2 + 1, "STOPTREF"); // store code
-		m_pusher.push(-2 + 1, "STOPTREF"); // store data
-		m_pusher.push(0, "STZERO"); // store library
-		m_pusher.push(0, "ENDC");
 		// stack: stateInit
 		solAssert(ss + 1 == m_pusher.getStack().size(), "");
 	} else {
