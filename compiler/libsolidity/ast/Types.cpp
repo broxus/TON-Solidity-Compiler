@@ -4285,7 +4285,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 							TypeProvider::integer(8, IntegerType::Modifier::Signed),
 							TypeProvider::tvmcell(),
 							TypeProvider::uint256(),
-							TypeProvider::optionValue()
+							TypeProvider::initializerList()
 						},
 						TypePointers{TypeProvider::address()},
 						strings{string("wid"), string("code"), string("pubkey"), string("varInit")},

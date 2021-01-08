@@ -116,10 +116,8 @@ void TVMABI::generateABI(ContractDefinition const *contract, std::vector<PragmaD
 	{
 		Json::Value data(Json::arrayValue);
 		for (const auto &[v, index] : ctx.getStaticVaribles()) {
-			Json::Value cur;
+			Json::Value cur = setupType(v->name(), v->type(), *v);
 			cur["key"] = index;
-			cur["name"] = v->name();
-			cur["type"] = getParamTypeString(v->type(), *v);
 			data.append(cur);
 		}
 		root["data"] = data;
