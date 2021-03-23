@@ -27,7 +27,6 @@
 #include <libsolidity/interface/OptimiserSettings.h>
 #include <libsolidity/interface/Version.h>
 #include <libsolidity/interface/DebugSettings.h>
-// #include <libsolidity/formal/SolverInterface.h>
 
 #include <liblangutil/ErrorReporter.h>
 #include <liblangutil/EVMVersion.h>
@@ -63,6 +62,7 @@ class Compiler;
 class GlobalContext;
 class Natspec;
 class DeclarationContainer;
+class PragmaDirective;
 
 /**
  * Easy to use and self-contained Solidity compiler with as few header dependencies as possible.
@@ -171,6 +171,34 @@ public:
 		m_mainContract = mainContract;
 	}
 
+	void generateAbi() {
+		m_generateAbi = true;
+	}
+
+	void generateCode() {
+		m_generateCode = true;
+	}
+
+	void withOptimizations() {
+		m_withOptimizations = true;
+	}
+
+	void doPrintInConsole() {
+		m_doPrintInConsole = true;
+	}
+
+	void setOutputFolder(const std::string& folder) {
+		m_folder = folder;
+	}
+
+	void setFileNamePrefix(const std::string& file_prefix) {
+		m_file_prefix = file_prefix;
+	}
+
+	void setInputFile(const std::string& inputFile) {
+		m_inputFile = inputFile;
+	}
+
 	/// Enable experimental generation of Yul IR code.
 	void enableIRGeneration(bool _enable = true) { m_generateIR = _enable; }
 
@@ -212,7 +240,7 @@ public:
 
 	/// Compiles the source units that were previously added and parsed.
 	/// @returns false on error.
-	bool compile();
+	std::pair<bool, bool> compile();
 
 	/// @returns the list of sources (paths) used
 	std::vector<std::string> sourceNames() const;
@@ -408,6 +436,9 @@ private:
 		FunctionDefinition const& _function
 	) const;
 
+	std::vector<PragmaDirective const *> getPragmaDirectives(Source const* source) const;
+
+
 	ReadCallback::Callback m_readFile;
 	OptimiserSettings m_optimiserSettings;
 	RevertStrings m_revertStrings = RevertStrings::Default;
@@ -443,6 +474,13 @@ private:
 	bool m_release = VersionIsRelease;
 	bool m_structWarning = false;
 	std::string m_mainContract;
+	bool m_generateAbi{};
+	bool m_generateCode{};
+	bool m_withOptimizations{};
+	bool m_doPrintInConsole{};
+	std::string m_folder;
+	std::string m_file_prefix;
+	std::string m_inputFile;
 };
 
 }

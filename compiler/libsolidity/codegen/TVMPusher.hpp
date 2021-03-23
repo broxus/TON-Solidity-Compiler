@@ -71,31 +71,20 @@ struct CodeLines {
 	int tabQty{};
 
 	string str(const string& indent = "") const;
-	void addTabs(const int qty = 1);
-	void subTabs(const int qty = 1);
+	void addTabs(int qty = 1);
+	void subTabs(int qty = 1);
 	void startContinuation();
+	void startIfRef();
+	void startIfNotRef();
+	void startCallRef();
 	void endContinuation();
 	void push(const string& cmd);
 	void append(const CodeLines& oth);
 };
 
 class TVMCompilerContext {
-private:
-	const ContractDefinition* m_contract{};
-	string_map<const FunctionDefinition*> m_functions;
-	map<const FunctionDefinition*, const ContractDefinition*> m_function2contract; // TODO delete
-
-	bool ignoreIntOverflow{};
-	PragmaDirectiveHelper const& m_pragmaHelper;
-	std::map<VariableDeclaration const *, int> m_stateVarIndex;
-	std::set<FunctionDefinition const*> m_libFunctions;
-
 public:
-	FunctionDefinition const* m_currentFunction{};
-	map<string, CodeLines> m_inlinedFunctions;
-
 	TVMCompilerContext(ContractDefinition const* contract, PragmaDirectiveHelper const& pragmaHelper);
-	void addFunction(FunctionDefinition const* _function);
 	void initMembers(ContractDefinition const* contract);
 	int getStateVarIndex(VariableDeclaration const *variable) const;
 	std::vector<VariableDeclaration const *> notConstantStateVariables() const;
@@ -106,16 +95,26 @@ public:
 	bool isStdlib() const;
 	string getFunctionInternalName(FunctionDefinition const* _function) const;
 	static string getFunctionExternalName(FunctionDefinition const* _function);
-	bool isPureFunction(FunctionDefinition const* f) const;
 	const ContractDefinition* getContract() const;
-	const ContractDefinition* getContract(const FunctionDefinition* f) const;
-	const FunctionDefinition* getLocalFunction(const string& fname) const;
 	bool ignoreIntegerOverflow() const;
 	FunctionDefinition const* afterSignatureCheck() const;
 	bool storeTimestampInC4() const;
 	void addLib(FunctionDefinition const* f);
 	const std::set<FunctionDefinition const*>& getLibFunctions() const { return m_libFunctions; }
-	std::vector<std::pair<VariableDeclaration const*, int>> getStaticVaribles() const;
+	std::vector<std::pair<VariableDeclaration const*, int>> getStaticVariables() const;
+	void setCurrentFunction(FunctionDefinition const* f) { m_currentFunction = f; }
+	FunctionDefinition const* getCurrentFunction() { return m_currentFunction; }
+	void addInlineFunction(const std::string& name, const CodeLines& code);
+	CodeLines getInlinedFunction(const std::string& name);
+
+private:
+	ContractDefinition const* m_contract{};
+	bool ignoreIntOverflow{};
+	PragmaDirectiveHelper const& m_pragmaHelper;
+	std::map<VariableDeclaration const*, int> m_stateVarIndex;
+	std::set<FunctionDefinition const*> m_libFunctions;
+	FunctionDefinition const* m_currentFunction{};
+	std::map<std::string, CodeLines> m_inlinedFunctions;
 };
 
 class StackPusherHelper {
@@ -130,10 +129,14 @@ public:
 
 public:
 	explicit StackPusherHelper(TVMCompilerContext* ctx, const int stackSize = 0);
+
 	void tryPollLastRetOpcode();
 	bool tryPollConvertBuilderToSlice();
 	bool tryPollEmptyPushCont();
+	bool cmpLastCmd(const std::string& cmd, int offset = 0);
 	void pollLastOpcode();
+	bool optimizeIf();
+
 	void append(const CodeLines& oth);
 	void addTabs(const int qty = 1);
 	void subTabs(const int qty = 1);
@@ -146,15 +149,21 @@ public:
 	[[nodiscard]]
 	TVMCompilerContext& ctx();
 	void push(int stackDiff, const string& cmd);
+
 	void startContinuation(int deltaStack = 0);
+	void startIfRef(int deltaStack = 0);
+	void startIfNotRef(int deltaStack = 0);
+	void startCallRef(int deltaStack = 0);
 	void endContinuation(int deltaStack = 0);
+
 	StructCompiler& structCompiler();
 	TVMStack& getStack();
-	void pushLog(const std::string& str);
+	void pushLog();
 	void pushLines(const std::string& lines);
 	void untuple(int n);
 	void index(int index);
-	void set_index(int index);
+	void setIndex(int index);
+	void setIndexQ(int index);
 	void tuple(int qty);
 	void resetAllStateVars();
 	void getGlob(VariableDeclaration const * vd);
@@ -163,7 +172,7 @@ public:
 	void setGlob(VariableDeclaration const * vd);
 	void pushS(int i);
 	void popS(int i);
-	void pushInt(int i);
+	void pushInt(const bigint& i);
 	void stzeroes(int qty);
 	void stones(int qty);
 	void sendrawmsg();
@@ -182,32 +191,34 @@ public:
 	);
 	void pushZeroAddress();
 	void generateC7ToT4Macro();
-	void storeStringInABuilder(std::string str);
 
 	static void addBinaryNumberToString(std::string &s, u256 value, int bitlen = 256);
 	static std::string binaryStringToSlice(const std::string & s);
 	static std::string tonsToBinaryString(Literal const* literal);
-	static std::string tonsToBinaryString(u256 value);
+	static std::string tonsToBinaryString(const u256& value);
 	static std::string tonsToBinaryString(bigint value);
 	std::string literalToSliceAddress(Literal const* literal, bool pushSlice = true);
+	static bigint pow10(int power);
 
-	bool tryImplicitConvert(Type const *leftType, Type const *rightType);
+	void hardConvert(Type const *leftType, Type const *rightType);
+	void checkFit(Type const *type);
 	void push(const CodeLines& codeLines);
-	void pushPrivateFunctionOrMacroCall(const int stackDelta, const string& fname);
+	void pushMacroCallInCallRef(int stackDelta, const string& fname);
+	void pushPrivateFunctionOrMacroCall(int stackDelta, const string& fname);
 	void pushCall(const string& functionName, const FunctionType* ft);
 	void drop(int cnt = 1);
 	void blockSwap(int m, int n);
 	void reverse(int i, int j);
 	void dropUnder(int leftCount, int droppedCount);
 	void exchange(int i, int j);
-	void prepareKeyForDictOperations(Type const* key, bool doIgnoreBytes = false);
+	void prepareKeyForDictOperations(Type const* key, bool doIgnoreBytes);
 	[[nodiscard]]
-	std::pair<std::string, int> int_msg_info(const std::set<int> &isParamOnStack, const std::map<int, std::string> &constParams);
+	int int_msg_info(const std::set<int> &isParamOnStack, const std::map<int, std::string> &constParams);
 	[[nodiscard]]
-	std::pair<std::string, int> ext_msg_info(const std::set<int> &isParamOnStack);
+	int ext_msg_info(const std::set<int> &isParamOnStack, bool isOut);
 	void appendToBuilder(const std::string& bitString);
 	void checkOptionalValue();
-	bool doesFitInOneCell(Type const* key, Type const* value);
+	bool doesFitInOneCellAndHaveNoStruct(Type const* key, Type const* value);
 	[[nodiscard]]
 	int maxBitLengthOfDictValue(Type const* type);
 	[[nodiscard]]
@@ -259,22 +270,34 @@ public:
   		const DataType& dataType = DataType::Slice
 	);
 
-	void ensureValueFitsType(const ElementaryTypeNameToken& typeName, const ASTNode& node);
-
 	void pushNull();
 	void pushDefaultValue(Type const* type, bool isResultBuilder = false);
 	void sendIntMsg(const std::map<int, const Expression *> &exprs,
 					const std::map<int, std::string> &constParams,
 					const std::function<void(int)> &appendBody,
 					const std::function<void()> &pushSendrawmsgFlag);
+
+	enum class MsgType{
+		Internal,
+		ExternalOut,
+		ExternalIn
+	};
+
 	void sendMsg(const std::set<int>& isParamOnStack,
 				 const std::map<int, std::string> &constParams,
 				 const std::function<void(int)> &appendBody,
 				 const std::function<void()> &appendStateInit,
 				 const std::function<void()> &pushSendrawmsgFlag,
-				 bool isInternalMessage = true);
+				 MsgType messageType = MsgType::Internal);
+
+	void prepareMsg(const std::set<int>& isParamOnStack,
+				 const std::map<int, std::string> &constParams,
+				 const std::function<void(int)> &appendBody,
+				 const std::function<void()> &appendStateInit,
+				 MsgType messageType = MsgType::Internal);
 
 	void switchSelector();
+	void byteLengthOfCell();
 };
 
 

@@ -62,9 +62,7 @@
 #include <iostream>
 #include <fstream>
 
-#include <libsolidity/codegen/TVM.h>
 #include <libsolidity/codegen/TVMOptimizations.hpp>
-#include <libsolidity/codegen/TVMContractCompiler.hpp>
 
 #if !defined(STDERR_FILENO)
 	#define STDERR_FILENO 2
@@ -106,6 +104,7 @@ static string const g_strLicense = "license";
 static string const g_strNatspecDev = "devdoc";
 static string const g_strNatspecUser = "userdoc";
 static string const g_strOutputDir = "output-dir";
+static string const g_strFile = "file";
 
 static string const g_strVersion = "version";
 static string const g_argAstCompactJson = g_strAstCompactJson;
@@ -115,17 +114,16 @@ static string const g_argInputFile = g_strInputFile;
 static string const g_argNatspecDev = g_strNatspecDev;
 static string const g_argNatspecUser = g_strNatspecUser;
 static string const g_argOutputDir = g_strOutputDir;
+static string const g_argFile = g_strFile;
 static string const g_argVersion = g_strVersion;
 
 static string const g_argTvm = "tvm";
 static string const g_argTvmABI = "tvm-abi";
 static string const g_argTvmOptimize = "tvm-optimize";
 static string const g_argTvmUnsavedStructs = "tvm-unsaved-structs";
-static string const g_argTvmWithoutLogStr = "without-logstr";
-static string const g_argTvmDumpStorage = "dump-storage";
 static string const g_argTvmPeephole = "tvm-peephole";
 static string const g_argSetContract = "contract";
-static string const g_argTvmMuteFlagWarning = "tvm-mute";
+
 
 static void version()
 {
@@ -195,8 +193,8 @@ void CommandLineInterface::handleNatspec(bool _natspecDev, string const& _contra
 
 bool CommandLineInterface::readInputFilesAndConfigureRemappings()
 {
-	if (m_args.count(g_argInputFile))
-		for (string path: m_args[g_argInputFile].as<vector<string>>())
+	if (m_args.count(g_argInputFile)) {
+		string path = m_args[g_argInputFile].as<string>();
 		{
 			auto eq = find(path.begin(), path.end(), '=');
 			if (eq != path.end())
@@ -236,6 +234,7 @@ bool CommandLineInterface::readInputFilesAndConfigureRemappings()
 			}
 			m_allowedDirectories.push_back(boost::filesystem::path(path).remove_filename());
 		}
+	}
 	if (m_sourceCodes.size() == 0)
 	{
 		serr() << "No input files given. If you wish to use the standard input please specify \"-\" explicitly." << endl;
@@ -256,7 +255,7 @@ This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you
 are welcome to redistribute it under certain conditions. See 'solc --license'
 for details.
 
-Usage: solc [options] [input_file...]
+Usage: solc [options] input-file
 
 Example:
 solc contract.sol
@@ -271,15 +270,20 @@ Allowed options)",
 		(g_strLicense.c_str(), "Show licensing information and exit.")
 		(
 			(g_argOutputDir + ",o").c_str(),
-			po::value<string>()->value_name("path"),
-			"If given, creates one file per component and contract/file at the specified directory."
+			po::value<string>()->value_name("path/to/dir"),
+			"Set absolute or relative path for directory for output files."
 		)
 		(
 			(g_argSetContract + ",c").c_str(),
-			po::value<string>()->value_name("contract"),
-			"If given, sets the Contract from source file to be compiled, otherwise the last one is compiled."
+			po::value<string>()->value_name("contractName"),
+			"Sets contract name from the source file to be compiled."
 		)
-			;
+		(
+			(g_argFile + ",f").c_str(),
+			po::value<string>()->value_name("prefixName"),
+			"Set prefix of names of output files (*.code and *abi.json)."
+		)
+		;
 	po::options_description outputComponents("Output Components");
 	outputComponents.add_options()
 		(g_argAstJson.c_str(), "AST of all source files in JSON format.")
@@ -287,17 +291,14 @@ Allowed options)",
 		(g_argNatspecUser.c_str(), "Natspec user documentation of all contracts.")
 		(g_argNatspecDev.c_str(), "Natspec developer documentation of all contracts.")
 		(g_argTvm.c_str(), "Produce TVM assembly (deprecated).")
-		(g_argTvmWithoutLogStr.c_str(), "Ignore tvm.log(string) and logtvm(string)")
-		(g_argTvmABI.c_str(), "Produce JSON ABI for contract (deprecated).")
-		(g_argTvmDumpStorage.c_str(), "Dump state vars")
+		(g_argTvmABI.c_str(), "Produce JSON ABI for contract.")
 		(g_argTvmPeephole.c_str(), "Run peephole optimization pass")
 		(g_argTvmOptimize.c_str(), "Optimize produced TVM assembly code")
-		(g_argTvmUnsavedStructs.c_str(), "Enable struct usage analizer");
-//		(g_argTvmMuteFlagWarning.c_str(), "Mute warning about --tvm and --tvm-abi flags. Use at your own risk.");
+		(g_argTvmUnsavedStructs.c_str(), "Enable struct usage analyzer");
 	desc.add(outputComponents);
 
 	po::options_description allOptions = desc;
-	allOptions.add_options()(g_argInputFile.c_str(), po::value<vector<string>>(), "input file");
+	allOptions.add_options()(g_argInputFile.c_str(), po::value<string>(), "input file");
 
 	// All positional options should be interpreted as input files
 	po::positional_options_description filesPositions;
@@ -319,26 +320,11 @@ Allowed options)",
 
 	const bool tvmAbi = m_args.count(g_argTvmABI);
 	const bool tvmCode = m_args.count(g_argTvm);
-	const bool tvmDump = m_args.count(g_argTvmDumpStorage);
-	if ((tvmAbi && tvmCode) || (tvmAbi && tvmDump) || (tvmCode && tvmDump))
+	if (tvmAbi && tvmCode)
 	{
-		serr() << "Option " << g_argTvmABI << ", " << g_argTvm << " and " << g_argTvmDumpStorage << " are mutualy exclusive." << endl;
+		serr() << "Option " << g_argTvmABI << " and " << g_argTvm << " are mutually exclusive." << endl;
 		return false;
 	}
-
-	TvmOption op;
-	if (tvmAbi) op = TvmOption::Abi;
-	else if (tvmDump) op = TvmOption::DumpStorage;
-	else if (tvmCode) op = TvmOption::Code;
-	else op = TvmOption::CodeAndAbi;
-	TVMCompilerEnable(op, m_args.count(g_argTvmWithoutLogStr), m_args.count(g_argTvmOptimize) > 0);
-
-//	const bool tvmMute = m_args.count(g_argTvmMuteFlagWarning);
-//	if ((tvmAbi || tvmCode) && !tvmMute) {
-//		serr() << "Warning: options --tvm and --tvm-abi are deprecated. Use solc without options to produce TVM assembly and ABI:" << endl;
-//		serr() << "  solc contract.sol" << endl;
-//		serr() << "This command compiles the contract and generates contract.code and contract.abi.json files." << endl;
-//	}
 
 	if (m_args.count(g_argTvmPeephole)) {
 		for (int i = 1; i < _argc; i++) {
@@ -432,9 +418,33 @@ bool CommandLineInterface::processInput()
 			m_compiler->setMainContract(m_args[g_argSetContract].as<string>());
 
 		if (m_args.count(g_argOutputDir))
-			TVMContractCompiler::m_outputFolder = m_args[g_argOutputDir].as<string>();
+			m_compiler->setOutputFolder(m_args[g_argOutputDir].as<string>());
 
-		bool successful = m_compiler->compile();
+		if (m_args.count(g_argFile))
+			m_compiler->setFileNamePrefix(m_args[g_argFile].as<string>());
+
+		if (m_args.count(g_argTvmABI))
+			m_compiler->generateAbi();
+		if (m_args.count(g_argTvm))
+			m_compiler->generateCode();
+		if (m_args.count(g_argTvm) == 0 && m_args.count(g_argTvmABI) == 0) {
+			m_compiler->generateCode();
+			m_compiler->generateAbi();
+		}
+		if (m_args.count(g_argTvmOptimize)) {
+			m_compiler->withOptimizations();
+		}
+		if (m_args.count(g_argTvm) || m_args.count(g_argTvmABI)) {
+			m_compiler->doPrintInConsole();
+		}
+
+		string fileName = m_args[g_argInputFile].as<string>();
+		m_compiler->setInputFile(fileName);
+
+		bool successful{};
+		bool didCompileSomething{};
+		std::tie(successful, didCompileSomething) = m_compiler->compile();
+		g_hasOutput |= didCompileSomething;
 
 		for (auto const& error: m_compiler->errors())
 		{
@@ -558,8 +568,6 @@ void CommandLineInterface::outputCompilationResults()
 		handleNatspec(true, contract);
 		handleNatspec(false, contract);
 	} // end of contracts iteration
-
-	g_hasOutput = TVMIsOutputProduced();
 
 	if (!g_hasOutput)
 	{

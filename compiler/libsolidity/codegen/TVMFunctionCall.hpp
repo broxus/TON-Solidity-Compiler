@@ -25,26 +25,31 @@ namespace solidity::frontend {
 class TVMExpressionCompiler;
 
 class FunctionCallCompiler {
-	StackPusherHelper& m_pusher;
-	TVMExpressionCompiler* const m_exprCompiler;
-	FunctionCall const& m_functionCall;
-	std::vector<ASTPointer<Expression const>> m_arguments;
-
-protected:
-	void acceptExpr(const Expression* expr);
-
 public:
-	FunctionCallCompiler(StackPusherHelper& m_pusher, TVMExpressionCompiler* exprCompiler, FunctionCall const& _functionCall);
+	FunctionCallCompiler(
+		StackPusherHelper& m_pusher,
+		TVMExpressionCompiler* exprCompiler,
+		FunctionCall const& _functionCall,
+		bool isCurrentResultNeeded
+	);
 	void structConstructorCall();
-	void compile();
+	bool compile();
 
 protected:
+	bool checkForMappingOrCurrenciesMethods();
+	void mappingDelMinOrMax(bool isDelMin);
+	void mappingGetSet();
+	void mappingMinMaxMethod(bool isMin);
+	void mappingPrevNextMethods();
+	void mappingEmpty();
 	bool structMethodCall();
 	void superFunctionCall(MemberAccess const& _node);
 	void typeTypeMethods(MemberAccess const& _node);
+	bool libraryCall(MemberAccess const& ma);
 	// TODO unite with decodeParameter
 	void loadTypeFromSlice(MemberAccess const& _node, TypePointer type);
 	bool checkForTvmDeployMethods(MemberAccess const& _node, Type::Category category);
+	bool checkForTvmBuildMsgMethods(MemberAccess const& _node, Type::Category category);
 	void sliceMethods(MemberAccess const& _node);
 	void arrayMethods(MemberAccess const& _node);
 	bool checkForOptionalMethods(MemberAccess const& _node);
@@ -63,17 +68,17 @@ protected:
 	void typeConversion();
 	bool checkLocalFunctionCall(const Identifier* identifier);
 	bool checkSolidityUnits();
-	bool checkForIdentifier();
+	bool checkLocalFunctionCallOrFuncVarCall();
 	bool checkNewExpression();
 	void computeContractAddr(ContractDefinition const& contract);
 	bool createNewContract();
 	void deployNewContract(
-		const std::function<void()> pushWid,
-		const std::function<void()> pushValue,
-		const std::function<void()> pushBounce,
-		const std::function<void()> pushCurrency,
-		const std::function<void(int builderSize)> appendBody,
-		const std::function<void()> pushSendrawmsgFlag
+		const std::function<void()>& pushWid,
+		const std::function<void()>& pushValue,
+		const std::function<void()>& pushBounce,
+		const std::function<void()>& pushCurrency,
+		const std::function<void(int builderSize)>& appendBody,
+		const std::function<void()>& pushSendrawmsgFlag
 	);
 	bool checkTvmIntrinsic();
 
@@ -85,12 +90,45 @@ protected:
 		Library
 	};
 	void buildStateInit(std::map<StateInitMembers, std::function<void()>> exprs);
-	std::function<void()> generateDataSection(std::function<void()> pushKey,
-				bool &hasVars,
-				ASTPointer<Expression const> vars,
-				bool &isNew,
-				ASTPointer<const Expression> contr
-			);
+	std::function<void()> generateDataSection(
+		const std::function<void()>& pushKey,
+		bool &hasVars,
+		const ASTPointer<Expression const>& vars,
+		bool &isNew,
+		const ASTPointer<const Expression>& contr
+	);
+	bool checkRemoteMethodCall(FunctionCall const &_functionCall);
+	void checkExtMsgSend(FunctionCall const& _functionCall);
+	std::string getDefaultMsgValue();
+	const FunctionDefinition* getRemoteFunctionDefinition(const MemberAccess* memberAccess);
+	void generateExtInboundMsg(
+		bool addSignature,
+		const Expression * destination,
+		const Expression *pubkey,
+		const Expression *expire,
+		const Expression *time,
+		const Expression *callbackid,
+		const Expression *abiVer,
+		const Expression *onerrorid,
+		const Expression *stateInit,
+		const CallableDeclaration *functionDefinition,
+		const ast_vec<Expression const> arguments
+	);
+
+
+	void pushArgs(bool reversed = false);
+	void pushArgAndConvert(int index, const std::string& name = "");
+	void pushExprAndConvert(const Expression* expr, Type const* targetType);
+	void acceptExpr(const Expression* expr);
+	void compileLog();
+private:
+	StackPusherHelper& m_pusher;
+	TVMExpressionCompiler* const m_exprCompiler{};
+	FunctionCall const& m_functionCall;
+	std::vector<ASTPointer<Expression const>> m_arguments;
+	FunctionType const* m_funcType{};
+	Type const* m_retType{};
+	bool m_isCurrentResultNeeded{};
 };
 
 }	// solidity

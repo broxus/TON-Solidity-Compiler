@@ -103,7 +103,7 @@ public:
 	void createDefaultStruct(bool resultIsBuilder = false);
 	void pushMember(const std::string &memberName, bool isStructTuple, bool returnStructAsSlice);
 	void setMemberForTuple(const std::string &memberName);
-	void structConstructor(ast_vec<ASTString> const& names, const std::function<void(int)>& pushParam);
+	void structConstructor(ast_vec<ASTString> const& names, const std::function<void(int, Type const*)>& pushParam);
 	void tupleToBuilder();
 	void stateVarsToBuilder();
 	void expandStruct(const std::string &memberName, bool doPushMemberOnStack);
@@ -111,9 +111,9 @@ public:
 	void convertSliceToTuple();
 	void sliceToStateVarsToC7();
 	static int maxBitLength(StructType const* structType);
-	static bool isCompatibleWithSDK(int keyLength, StructType const* structType);
+	static bool doesFitInOneCellAndHaveNoStruct(int keyLength, StructType const* structType);
 private:
-	bool isCompatibleWithSDK(int keyLength) const;
+	bool doesFitInOneCellAndHaveNoStruct(int keyLength) const;
 public:
 	const std::vector<Node>& getNodes() { return nodes; }
 private:

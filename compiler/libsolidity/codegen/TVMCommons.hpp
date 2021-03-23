@@ -39,11 +39,10 @@ using namespace solidity::frontend;
 using namespace langutil;
 using namespace solidity::util;
 
-#define DBG(x) cout << x << endl;
+#define DBG(x) cout << (x) << endl;
 
 namespace solidity::frontend {
 
-template <typename T>	using string_map = std::map<std::string, T>;
 template <typename T> using ast_vec = std::vector<ASTPointer<T>>;
 
 template <typename T1, typename T2>
@@ -58,73 +57,10 @@ constexpr uint64_t str2int(const char* str, int i = 0) {
 	return !str[i] ? 5381 : (str2int(str, i+1) * 33) ^ str[i];
 }
 
-template <typename T, typename TT>
-T get_from_map(const string_map<T>& map, const string& key, TT defValue) {
-	if (map.count(key) > 0)
-		return map.at(key);
-	return defValue;
-}
-
 bool ends_with(const string& str, const string& suffix);
 
 std::string functionName(FunctionDefinition const* _function);
 
-class ContactsUsageScanner: public ASTConstVisitor
-{
-public:
-	explicit ContactsUsageScanner(ContractDefinition const& cd) {
-		for (ContractDefinition const* base : cd.annotation().linearizedBaseContracts) {
-			base->accept(*this);
-		}
-	}
-
-	bool visit(FunctionCall const& _functionCall) override {
-		auto ma = to<MemberAccess>(&_functionCall.expression());
-		if (ma && ma->memberName() == "pubkey" && ma->expression().annotation().type->category() == Type::Category::Magic) {
-			auto expr = to<Identifier>(&ma->expression());
-			if (expr && expr->name() == "msg") {
-				haveMsgPubkey = true;
-			}
-		}
-		return true;
-	}
-
-	bool visit(MemberAccess const &_node) override {
-		if (_node.expression().annotation().type->category() == Type::Category::Magic) {
-			auto identifier = to<Identifier>(&_node.expression());
-			if (identifier && identifier->name() == "msg" && _node.memberName() == "sender") {
-				haveMsgSender = true;
-			}
-		}
-		return true;
-	}
-
-	bool haveMsgPubkey{};
-	bool haveMsgSender{};
-};
-
-
-class FunctionUsageScanner: public ASTConstVisitor
-{
-public:
-	explicit FunctionUsageScanner(const ASTNode& node) {
-		node.accept(*this);
-	}
-
-	bool visit(FunctionCall const& _functionCall) override {
-		auto identifier = to<Identifier>(&_functionCall.expression());
-		if (identifier) {
-			auto functionDefinition = to<FunctionDefinition>(identifier->annotation().referencedDeclaration);
-			if (functionDefinition && !functionDefinition->isInline()) {
-				havePrivateFunctionCall = true;
-			}
-		}
-
-		return true;
-	}
-
-	bool havePrivateFunctionCall{};
-};
 
 template <typename T>
 static bool doesAlways(const Statement* st) {
@@ -169,6 +105,8 @@ bool isByteArrayOrString(const Type* type);
 
 bool isString(const Type* type);
 
+bool isSlice(const Type* type);
+
 struct AddressInfo {
 
 	static int stdAddrLength() {
@@ -209,10 +147,14 @@ struct TypeInfo {
 			isNumeric = true;
 			isSigned = false;
 			numBits = 8 * static_cast<int>(fixedBytesType->numBytes());
-		} else if (auto* enumType = to<EnumType>(type)) {
+		} else if (auto enumType = to<EnumType>(type)) {
 			isNumeric = true;
 			isSigned = false;
 			numBits = bitsForEnum(enumType->numberOfMembers());
+		} else if (auto* fp = to<FixedPointType>(type)) {
+			isNumeric = true;
+			isSigned = fp->isSigned();
+			numBits = fp->numBits();
 		}
 		category = type->category();
 	}
@@ -240,6 +182,9 @@ IntegerType getKeyTypeOfC4();
 
 IntegerType getKeyTypeOfArray();
 
+std::tuple<Type const*, Type const*>
+dictKeyValue(Type const* type);
+
 string storeIntegralOrAddress(const Type* type, bool reverse);
 
 vector<ContractDefinition const*> getContractsChain(ContractDefinition const* contract);
@@ -253,7 +198,7 @@ bool isSuper(Expression const* expr);
 
 bool isMacro(const std::string& functionName);
 
-bool isAddressThis(const FunctionCall* fcall);
+bool isAddressThis(const FunctionCall* funCall);
 
 // List of all function but constructors with a given name
 vector<FunctionDefinition const*> getContractFunctions(ContractDefinition const* contract, const string& funcName);
@@ -262,8 +207,8 @@ vector<FunctionDefinition const*> getContractFunctions(ContractDefinition const*
 vector<FunctionDefinition const*> getContractFunctions(ContractDefinition const* contract);
 
 const ContractDefinition* getSuperContract(const ContractDefinition* currentContract,
-											const ContractDefinition* mainContract,
-											const string& fname);
+										   const ContractDefinition* mainContract,
+										   const string& fname);
 
 [[noreturn]]
 void cast_error(const ASTNode& node, const string& error_message);
@@ -307,13 +252,9 @@ public:
 	}
 
 	bool haveIgnoreIntOverflow() const {
-		for (PragmaDirective const *pd : pragmaDirectives) {
-			if (pd->literals().size() == 1 &&
-				 pd->literals()[0] == "ignoreIntOverflow") {
-				return true;
-			}
-		}
-		return false;
+		return std::any_of(pragmaDirectives.begin(), pragmaDirectives.end(), [](const auto& pd){
+			return pd->literals().size() == 1 && pd->literals()[0] == "ignoreIntOverflow";
+		});
 	}
 
 	ASTPointer<Expression> haveMsgValue() const {
@@ -375,7 +316,7 @@ struct ABITypeSize {
 			if (node)
 				cast_error(*node, "Undefined type");
 			else {
-				solAssert(false, "Undefined type");
+				solUnimplemented("Undefined type");
 			}
 		}
 	}
@@ -412,6 +353,9 @@ bool isEmptyFunction(FunctionDefinition const* f);
 std::vector<VariableDeclaration const*>
 convertArray(std::vector<ASTPointer<VariableDeclaration>> const& arr);
 
+std::vector<Type const*>
+getTypesFromVarDecls(std::vector<ASTPointer<VariableDeclaration>> const& arr);
+
 std::pair<
 	std::vector<Type const*>,
 	std::vector<std::string>
@@ -432,6 +376,8 @@ enum class DictValueType {
 	Enum,
 	ExtraCurrencyCollection,
 	FixedBytes,
+	FixedPoint,
+	Function,
 	Integer,
 	Mapping,
 	Optional,
@@ -441,8 +387,10 @@ enum class DictValueType {
 	VarInteger
 };
 
-DictValueType toDictValueType(const Type::Category& caterory);
+DictValueType toDictValueType(const Type::Category& category);
 
 int integerLog2(int value);
+
+std::string stringToBytes(std::string str);
 
 } // end solidity::frontend

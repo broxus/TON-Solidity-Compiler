@@ -40,10 +40,10 @@ StackPusherHelper::StackPusherHelper(TVMCompilerContext *ctx, const int stackSiz
 	m_stack.change(stackSize);
 }
 
-void StackPusherHelper::pushLog(const std::string& str) {
-	if (!TVMContractCompiler::g_without_logstr) {
-		push(0, "PRINTSTR " + str);
-	}
+void StackPusherHelper::pushLog() {
+	push(0, "CTOS");
+	push(0, "STRDUMP");
+	drop();
 }
 
 StructCompiler &StackPusherHelper::structCompiler() {
@@ -52,7 +52,7 @@ StructCompiler &StackPusherHelper::structCompiler() {
 
 void StackPusherHelper::generateC7ToT4Macro() {
 	push(+1, ""); // fix stack, allocate builder
-	generateGlobl("c7_to_c4", false);
+	generateMacro("c7_to_c4");
 	pushLines(R"(
 GETGLOB 2
 NEWC
@@ -78,30 +78,7 @@ POP C4
 	push(0, " ");
 }
 
-std::string stringToBytes(std::string str) {
-	std::string slice;
-	for (size_t index = 0; index < str.length(); ++index) {
-		std::stringstream ss;
-		ss << std::hex << std::setfill('0') << std::setw(2)
-			<< (static_cast<unsigned>(str.at(index)) & 0xFF);
-		slice += ss.str();
-	}
-	return slice;
-}
-
-void StackPusherHelper::storeStringInABuilder(string str) {
-	size_t maxSlice = (TvmConst::MaxPushSliceLength >> 1);
-	pushLines
-(R"(
-PUSHSLICE x)" + ((str.length() <= maxSlice) ?  stringToBytes(str)
-: (stringToBytes(str.substr(0, maxSlice)) + R"(
-STSLICER
-PUSHSLICE x)" + stringToBytes(str.substr(maxSlice)))) + R"(
-STSLICER
-)");
-}
-
-bool StackPusherHelper::doesFitInOneCell(Type const* key, Type const* value) {
+bool StackPusherHelper::doesFitInOneCellAndHaveNoStruct(Type const* key, Type const* value) {
 	int keyLength = lengthOfDictKey(key);
 	return
 		2 + // hml_long$10
@@ -117,7 +94,8 @@ int StackPusherHelper::maxBitLengthOfDictValue(Type const* type) {
 		case DictValueType::Enum:
 		case DictValueType::Integer:
 		case DictValueType::Bool:
-		case DictValueType::FixedBytes: {
+		case DictValueType::FixedBytes:
+		case DictValueType::FixedPoint: {
 			TypeInfo ti{type};
 			return ti.numBits;
 		}
@@ -150,9 +128,12 @@ int StackPusherHelper::maxBitLengthOfDictValue(Type const* type) {
 			return StructCompiler::maxBitLength(to<StructType>(type));
 		}
 
-		default:
-			solAssert(false, "Unsupported " + type->toString());
+		case DictValueType::Function: {
+			return 32;
+		}
 	}
+
+	solUnimplemented("Unsupported " + type->toString());
 }
 
 DataType
@@ -161,17 +142,12 @@ StackPusherHelper::prepareValueForDictOperations(Type const *keyType, Type const
 
 	switch (toDictValueType(valueType->category())) {
 		case DictValueType::TvmSlice: {
-			if (!isValueBuilder) {
-				push(0, "NEWC");
-				push(0, "STSLICE");
-			}
-			push(0, "ENDC");
-			return DataType::Cell;
+			return isValueBuilder ? DataType::Builder : DataType::Slice;
 		}
 
 		case DictValueType::Address:
 		case DictValueType::Contract: {
-			if (!doesFitInOneCell(keyType, valueType)) {
+			if (!doesFitInOneCellAndHaveNoStruct(keyType, valueType)) {
 				solAssert(!isValueBuilder, "");
 				push(+1, "NEWC");
 				push(-1, "STSLICE");
@@ -184,7 +160,7 @@ StackPusherHelper::prepareValueForDictOperations(Type const *keyType, Type const
 		case DictValueType::Array: {
 			if (isByteArrayOrString(valueType)) {
 				if (isValueBuilder) {
-					push(-1 + 1, "ENDC"); // TODO try to push the builder in new builder
+					push(-1 + 1, "ENDC");
 				}
 				return DataType::Cell;
 			}
@@ -195,17 +171,19 @@ StackPusherHelper::prepareValueForDictOperations(Type const *keyType, Type const
 		case DictValueType::Enum:
 		case DictValueType::ExtraCurrencyCollection:
 		case DictValueType::FixedBytes:
+		case DictValueType::FixedPoint:
 		case DictValueType::Integer:
 		case DictValueType::Mapping:
 		case DictValueType::Optional:
 		case DictValueType::VarInteger:
+		case DictValueType::Function:
 		{
 			if (!isValueBuilder) {
 				push(0, "NEWC");
 				store(valueType, false, 0);
 				push(+1, "");
 			}
-			if (!doesFitInOneCell(keyType, valueType)) {
+			if (!doesFitInOneCellAndHaveNoStruct(keyType, valueType)) {
 				push(0, "NEWC");
 				push(0, "STBREF");
 			}
@@ -217,7 +195,7 @@ StackPusherHelper::prepareValueForDictOperations(Type const *keyType, Type const
 				StructCompiler sc{this, to<StructType>(valueType)};
 				sc.tupleToBuilder();
 			}
-			if (!doesFitInOneCell(keyType, valueType)) {
+			if (!doesFitInOneCellAndHaveNoStruct(keyType, valueType)) {
 				push(0, "ENDC");
 				return DataType::Cell;
 			}
@@ -241,14 +219,16 @@ StackPusherHelper::prepareValueForDictOperations(Type const *keyType, Type const
 bool StackPusherHelper::doesDictStoreValueInRef(Type const* keyType, Type const* valueType) {
 	switch (toDictValueType(valueType->category())) {
 		case DictValueType::TvmCell:
-		case DictValueType::TvmSlice:
 			return true;
+
+		case DictValueType::TvmSlice:
+			return false;
 
 		case DictValueType::Array: {
 			if (isByteArrayOrString(valueType)) {
 				return true;
 			}
-			return !doesFitInOneCell(keyType, valueType);
+			return !doesFitInOneCellAndHaveNoStruct(keyType, valueType);
 		}
 
 
@@ -258,12 +238,14 @@ bool StackPusherHelper::doesDictStoreValueInRef(Type const* keyType, Type const*
 		case DictValueType::Enum:
 		case DictValueType::ExtraCurrencyCollection:
 		case DictValueType::FixedBytes:
+		case DictValueType::FixedPoint:
 		case DictValueType::Integer:
 		case DictValueType::Mapping:
 		case DictValueType::Optional:
 		case DictValueType::VarInteger:
 		case DictValueType::Struct:
-			return !doesFitInOneCell(keyType, valueType);
+		case DictValueType::Function:
+			return !doesFitInOneCellAndHaveNoStruct(keyType, valueType);
 	}
 	solUnimplemented("");
 }
@@ -316,11 +298,13 @@ void StackPusherHelper::recoverKeyAndValueAfterDictOperation(
 			case DictValueType::Enum:
 			case DictValueType::ExtraCurrencyCollection:
 			case DictValueType::FixedBytes:
+			case DictValueType::FixedPoint:
 			case DictValueType::Integer:
 			case DictValueType::Mapping:
 			case DictValueType::Optional:
 			case DictValueType::Struct:
 			case DictValueType::VarInteger:
+			case DictValueType::Function:
 			{
 				if (didUseOpcodeWithRef) {
 					push(0, "CTOS");
@@ -340,6 +324,12 @@ void StackPusherHelper::recoverKeyAndValueAfterDictOperation(
 				}
 				break;
 			}
+		}
+	};
+
+	auto checkOnMappingOrOptional = [&]() {
+		if (isIn(valueType->category(), Type::Category::Mapping, Type::Category::Optional)) {
+			tuple(1);
 		}
 	};
 
@@ -378,6 +368,8 @@ void StackPusherHelper::recoverKeyAndValueAfterDictOperation(
 			preloadValue();
 			if (haveKey) {
 				tuple(2);
+			} else {
+				checkOnMappingOrOptional();
 			}
 			endContinuation();
 
@@ -389,6 +381,7 @@ void StackPusherHelper::recoverKeyAndValueAfterDictOperation(
 
 			startContinuation();
 			preloadValue();
+			checkOnMappingOrOptional();
 			endContinuation();
 
 			push(0, "IFNOT");
@@ -468,7 +461,7 @@ void StackPusherHelper::tryPollLastRetOpcode() {
 	if (m_code.lines.empty()) {
 		return;
 	}
-	if (std::regex_match(m_code.lines.back(), std::regex("(\t*)RET"))) {
+	if (cmpLastCmd("RET")) {
 		m_code.lines.pop_back();
 	}
 }
@@ -476,8 +469,8 @@ void StackPusherHelper::tryPollLastRetOpcode() {
 bool StackPusherHelper::tryPollConvertBuilderToSlice() {
 	int n = m_code.lines.size();
 	if (n >= 2 &&
-		std::regex_match(m_code.lines[n - 1], std::regex("(\t*)CTOS")) &&
-		std::regex_match(m_code.lines[n - 2], std::regex("(\t*)ENDC"))
+		cmpLastCmd("CTOS") &&
+		cmpLastCmd("ENDC", 1)
 	)
 	{
 		m_code.lines.pop_back();
@@ -490,10 +483,9 @@ bool StackPusherHelper::tryPollConvertBuilderToSlice() {
 bool StackPusherHelper::tryPollEmptyPushCont() {
 	int n = m_code.lines.size();
 	if (n >= 2 &&
-		std::regex_match(m_code.lines[n - 2], std::regex("(\t*)PUSHCONT \\{")) &&
-		std::regex_match(m_code.lines[n - 1], std::regex("(\t*)\\}"))
-	)
-	{
+		cmpLastCmd("PUSHCONT \\{", 1) &&
+		cmpLastCmd("\\}")
+	) {
 		m_code.lines.pop_back();
 		m_code.lines.pop_back();
 		return true;
@@ -501,8 +493,30 @@ bool StackPusherHelper::tryPollEmptyPushCont() {
 	return false;
 }
 
+bool StackPusherHelper::cmpLastCmd(const std::string& cmd, int offset) {
+	int n = m_code.lines.size() - 1 - offset;
+	return n >= 0 &&
+		std::regex_match(m_code.lines[n], std::regex("(\t*)" + cmd));
+}
+
 void StackPusherHelper::pollLastOpcode() {
 	m_code.lines.pop_back();
+}
+
+bool StackPusherHelper::optimizeIf() {
+	bool reverseOpcode = false;
+	if (cmpLastCmd("NOT")) {
+		while (cmpLastCmd("NOT")) {
+			pollLastOpcode();
+			reverseOpcode ^= true;
+		}
+	} else if (cmpLastCmd("EQINT 0")) {
+		pollLastOpcode();
+		reverseOpcode ^= true;
+	} else if (cmpLastCmd("NEQINT 0")) {
+		pollLastOpcode();
+	}
+	return reverseOpcode;
 }
 
 void StackPusherHelper::append(const CodeLines &oth) {
@@ -562,6 +576,21 @@ void StackPusherHelper::startContinuation(int deltaStack) {
 	m_stack.change(deltaStack);
 }
 
+void StackPusherHelper::startIfRef(int deltaStack) {
+	m_code.startIfRef();
+	m_stack.change(deltaStack);
+}
+
+void StackPusherHelper::startIfNotRef(int deltaStack) {
+	m_code.startIfNotRef();
+	m_stack.change(deltaStack);
+}
+
+void StackPusherHelper::startCallRef(int deltaStack) {
+	m_code.startCallRef();
+	m_stack.change(deltaStack);
+}
+
 void StackPusherHelper::endContinuation(int deltaStack) {
 	m_code.endContinuation();
 	m_stack.change(deltaStack);
@@ -601,7 +630,7 @@ void StackPusherHelper::index(int index) {
 	}
 }
 
-void StackPusherHelper::set_index(int index) {
+void StackPusherHelper::setIndex(int index) {
 	solAssert(0 <= index, "");
 	if (index <= 15) {
 		push(-2 + 1, "SETINDEX " + toString(index));
@@ -609,6 +638,17 @@ void StackPusherHelper::set_index(int index) {
 		solAssert(index <= 254, "");
 		pushInt(index);
 		push(-1 - 2 + 1, "SETINDEXVAR");
+	}
+}
+
+void StackPusherHelper::setIndexQ(int index) {
+	solAssert(0 <= index, "");
+	if (index <= 15) {
+		push(-2 + 1, "SETINDEXQ " + toString(index));
+	} else {
+		solAssert(index <= 254, "");
+		pushInt(index);
+		push(-1 - 2 + 1, "SETINDEXVARQ");
 	}
 }
 
@@ -678,7 +718,7 @@ void StackPusherHelper::popS(int i) {
 	push(-1, "POP S" + toString(i));
 }
 
-void StackPusherHelper::pushInt(int i) {
+void StackPusherHelper::pushInt(const bigint& i) {
 	push(+1, "PUSHINT " + toString(i));
 }
 
@@ -693,7 +733,6 @@ bool StackPusherHelper::fastLoad(const Type* type) {
 			exchange(0, 1); // slice value
 			pushS(0); // slice value value
 			push(-1 + 1, "ISNULL"); // slice value isNull
-
 			push(-1, ""); // fix stack
 
 			startContinuation();
@@ -701,6 +740,9 @@ bool StackPusherHelper::fastLoad(const Type* type) {
 			push(0, "CTOS"); // slice sliceValue
 			// TODO add test
 			preload(opt->valueType(), UseCurrentSlice); // slice value
+			if (isIn(opt->valueType()->category(), Type::Category::Mapping, Type::Category::Optional)) {
+				tuple(1);
+			}
 			endContinuation();
 
 			push(0, "IFNOT");
@@ -726,11 +768,16 @@ bool StackPusherHelper::fastLoad(const Type* type) {
 		case Type::Category::Enum:
 		case Type::Category::Integer:
 		case Type::Category::Bool:
+		case Type::Category::FixedPoint:
 		case Type::Category::FixedBytes: {
 			TypeInfo ti{type};
 			solAssert(ti.isNumeric, "");
 			string cmd = ti.isSigned ? "LDI " : "LDU ";
 			push(-1 + 2, cmd + toString(ti.numBits));
+			return true;
+		}
+		case Type::Category::Function: {
+			push(-1 + 2, "LDU 32");
 			return true;
 		}
 		case Type::Category::Array: {
@@ -750,7 +797,7 @@ bool StackPusherHelper::fastLoad(const Type* type) {
 			push(-1 + 2, "LDDICT");
 			return true;
 		default:
-			solAssert(false, "");
+			solUnimplemented(type->toString());
 	}
 }
 
@@ -781,7 +828,10 @@ void StackPusherHelper::preload(const Type *type, uint32_t mask) {
 			// stack: slice
 			push(-1 + 1, "PLDREF");
 			push(-1 + 1, "CTOS");
-			preload(opt->valueType(), mask | UseCurrentSlice);
+			preload(opt->valueType(),UseCurrentSlice);
+			if (isIn(opt->valueType()->category(), Type::Category::Mapping, Type::Category::Optional)) {
+				tuple(1);
+			}
 			endContinuation();
 			getStack().ensureSize(savedStake0);
 
@@ -822,11 +872,16 @@ void StackPusherHelper::preload(const Type *type, uint32_t mask) {
 		case Type::Category::Integer:
 		case Type::Category::Enum:
 		case Type::Category::Bool:
+		case Type::Category::FixedPoint:
 		case Type::Category::FixedBytes: {
 			TypeInfo ti{type};
 			solAssert(ti.isNumeric, "");
 			string cmd = ti.isSigned ? "PLDI " : "PLDU ";
 			push(-1 + 1, cmd + toString(ti.numBits));
+			break;
+		}
+		case Type::Category::Function: {
+			push(-1 + 1, "PLDU 32");
 			break;
 		}
 		case Type::Category::Array: {
@@ -881,10 +936,13 @@ void StackPusherHelper::store(
 			push(-1 + 1, "NOT");	// builder value !isnull
 
 			push(-1, ""); // fix stack
-
 			getStack().ensureSize(stackSize);
+
 			startContinuation();
 			// builder value
+			if (isIn(optType->valueType()->category(), Type::Category::Optional, Type::Category::Mapping)) {
+				untuple(1);
+			}
 			push(+1, "NEWC"); // builder value builder
 			store(optType->valueType(), false, 0); // builder builderWithValue
 			exchange(0, 1); // builderWithValue builder
@@ -892,8 +950,8 @@ void StackPusherHelper::store(
 			push(-1, "STBREF");	// builder
 			endContinuation();
 			push(+1, ""); // fix stack
-
 			getStack().ensureSize(stackSize);
+
 			startContinuation();
 			// builder value
 			drop(1); // builder
@@ -924,7 +982,7 @@ void StackPusherHelper::store(
 				if (mask & StoreFlag::StoreStructInRef)
 					push(-1, reverse? "STBREFR" : "STBREF"); // builder
 				else
-					solAssert(false, "TODO");
+					solUnimplemented("TODO");
 			} else {
 				if (!reverse) {
 					push(0, "SWAP"); // builder struct
@@ -950,12 +1008,22 @@ void StackPusherHelper::store(
 		case Type::Category::Enum:
 		case Type::Category::Bool:
 		case Type::Category::FixedBytes:
+		case Type::Category::FixedPoint:
 			if (mask & StoreFlag::ValueIsBuilder) {
 				push(-1, reverse ? "STBR" : "STB");
 			} else {
 				push(-1, storeIntegralOrAddress(type, reverse));
 			}
 			break;
+		case Type::Category::Function: {
+			if (mask & StoreFlag::ValueIsBuilder) {
+				push(-1, reverse ? "STBR" : "STB");
+				solUnimplemented("");
+			} else {
+				push(-1, reverse ? "STUR 32" : "STU 32");
+			}
+			break;
+		}
 		case Type::Category::Mapping:
 		case Type::Category::ExtraCurrencyCollection:
 			if (reverse) {
@@ -1059,7 +1127,7 @@ std::string StackPusherHelper::tonsToBinaryString(Literal const *literal) {
 	return tonsToBinaryString(value);
 }
 
-std::string StackPusherHelper::tonsToBinaryString(u256 value) {
+std::string StackPusherHelper::tonsToBinaryString(const u256& value) {
 	return tonsToBinaryString(bigint(value));
 }
 
@@ -1104,17 +1172,252 @@ std::string StackPusherHelper::literalToSliceAddress(Literal const *literal, boo
 	return s;
 }
 
-bool StackPusherHelper::tryImplicitConvert(Type const *leftType, Type const *rightType) {
-	if (leftType->category() == Type::Category::FixedBytes && rightType->category() == Type::Category::StringLiteral) {
-		auto stringLiteralType = to<StringLiteralType>(rightType);
-		u256 value = 0;
-		for (char c : stringLiteralType->value()) {
-			value = value * 256 + c;
-		}
-		push(+1, "PUSHINT " + toString(value));
-		return true;
+bigint StackPusherHelper::pow10(int power) {
+	bigint r = 1;
+	for (int i = 1; i <= power; ++i) {
+		r *= 10;
 	}
-	return false;
+	return r;
+}
+
+void StackPusherHelper::hardConvert(Type const *leftType, Type const *rightType) {
+	// case opt(T) = T
+	if (leftType->category() == Type::Category::Optional && *leftType != *rightType) {
+		auto l = to<OptionalType>(leftType);
+		hardConvert(l->valueType(), rightType);
+		if (isIn(l->valueType()->category(), Type::Category::Mapping, Type::Category::Optional)) {
+			tuple(1);
+		}
+		return;
+	}
+
+
+
+	bool impl = rightType->isImplicitlyConvertibleTo(*leftType);
+
+	auto fixedPointFromFixedPoint = [this, impl](FixedPointType const* l, FixedPointType const* r) {
+		int powerDiff = l->fractionalDigits() - r->fractionalDigits();
+		if (powerDiff != 0) {
+			if (powerDiff > 0) {
+				pushInt(pow10(powerDiff));
+				push(-2 + 1, "MUL");
+			} else {
+				pushInt(pow10(-powerDiff));
+				push(-2 + 1, "DIV");
+			}
+		}
+		if (!impl)
+			checkFit(l);
+	};
+
+	auto integerFromFixedPoint = [this, impl](IntegerType const* l, FixedPointType const* r) {
+		int powerDiff = r->fractionalDigits();
+		if (powerDiff > 0) {
+			pushInt(pow10(powerDiff));
+			push(-2 + 1, "DIV");
+		}
+		if (!impl)
+			checkFit(l);
+	};
+
+	auto integerFromInteger = [this, impl](IntegerType const* l, IntegerType const* /*r*/) {
+		if (!impl)
+			checkFit(l);
+	};
+
+	auto fixedPointFromInteger = [this, impl](FixedPointType const* l, IntegerType const* /*r*/) {
+		int powerDiff = l->fractionalDigits();
+		if (powerDiff > 0) {
+			pushInt(pow10(powerDiff));
+			push(-2 + 1, "MUL");
+		}
+		if (!impl)
+			checkFit(l);
+	};
+
+	auto fixedBytesFromFixedBytes = [this](FixedBytesType const* l, FixedBytesType const* r) {
+		int diff = 8 * (l->numBytes() - r->numBytes());
+		if (diff > 0) {
+			push(0, "LSHIFT " + std::to_string(diff));
+		} else if (diff < 0) {
+			push(0, "RSHIFT " + std::to_string(-diff));
+		}
+	};
+
+	auto fixedBytesFromStringLiteral = [this](FixedBytesType const* l, StringLiteralType const* r) {
+		size_t bytes = 0;
+		u256 value = 0;
+		for (char c : r->value()) {
+			value = value * 256 + c;
+			++bytes;
+		}
+		while (bytes < l->numBytes()) {
+			value *= 256;
+			++bytes;
+		}
+		drop(1); // delete old value
+		push(+1, "PUSHINT " + toString(value));
+	};
+
+	auto fromFixedPoint = [&](FixedPointType const* r) {
+		switch (leftType->category()) {
+			case Type::Category::FixedPoint:
+				fixedPointFromFixedPoint(to<FixedPointType>(leftType), r);
+				break;
+			case Type::Category::Integer:
+				integerFromFixedPoint(to<IntegerType>(leftType), r);
+				break;
+			default:
+				solUnimplemented("");
+				break;
+		}
+	};
+
+	auto fromInteger = [&](IntegerType const* r) {
+		switch (leftType->category()) {
+			case Type::Category::FixedPoint:
+				fixedPointFromInteger(to<FixedPointType>(leftType), r);
+				break;
+			case Type::Category::Integer:
+				integerFromInteger(to<IntegerType>(leftType), r);
+				break;
+			case Type::Category::FixedBytes:
+				// nothing do here
+				break;
+			case Type::Category::Address:
+				solUnimplemented("See FunctionCallCompiler::typeConversion");
+				break;
+			default:
+				solUnimplemented(leftType->toString());
+				break;
+		}
+	};
+	
+	
+	
+	
+	switch (rightType->category()) {
+
+		case Type::Category::RationalNumber: {
+			Type const* mt = rightType->mobileType();
+			if (mt->category() == Type::Category::Integer) {
+				fromInteger(to<IntegerType>(mt));
+			} else if (mt->category() == Type::Category::FixedPoint) {
+				fromFixedPoint(to<FixedPointType>(mt));
+			} else {
+				solUnimplemented("");
+			}
+			break;
+		}
+
+		case Type::Category::FixedPoint: {
+			fromFixedPoint(to<FixedPointType>(rightType));
+			break;
+		}
+
+		case Type::Category::Integer: {
+			fromInteger(to<IntegerType>(rightType));
+			break;
+		}
+
+		case Type::Category::FixedBytes: {
+			auto r = to<FixedBytesType>(rightType);
+			switch (leftType->category()) {
+				case Type::Category::FixedBytes:
+					fixedBytesFromFixedBytes(to<FixedBytesType>(leftType), r);
+					break;
+				default:
+					solUnimplemented("");
+					break;
+			}
+			break;
+		}
+
+
+		case Type::Category::Array: {
+			auto r = to<ArrayType>(rightType);
+			if (!r->isByteArray()) {
+				break;
+			}
+			// bytes or string
+			switch (leftType->category()) {
+				case Type::Category::Array:
+					break;
+				default:
+					solUnimplemented("");
+					break;
+			}
+			break;
+		}
+
+		case Type::Category::Address:
+		case Type::Category::Bool:
+		case Type::Category::Contract:
+		case Type::Category::Enum:
+		case Type::Category::ExtraCurrencyCollection:
+		case Type::Category::Function:
+		case Type::Category::Mapping:
+		case Type::Category::Optional: // !!!
+		case Type::Category::Struct:
+		case Type::Category::TvmBuilder:
+		case Type::Category::TvmCell:
+		case Type::Category::TvmSlice:
+			break;
+
+		case Type::Category::Tuple:
+			// opt(fixed32x5, fixed32x5) a;
+//			 a.get() = (1, 2, 4);
+			break;
+
+		case Type::Category::StringLiteral: {
+			auto r = to<StringLiteralType>(rightType);
+			switch (leftType->category()) {
+				case Type::Category::FixedBytes:
+					fixedBytesFromStringLiteral(to<FixedBytesType>(leftType), r);
+					break;
+				case Type::Category::Array:
+					break;
+				default:
+					solUnimplemented(leftType->toString());
+					break;
+			}
+			break;
+		}
+
+		default:
+			solUnimplemented(rightType->toString());
+			break;
+	}
+}
+
+void StackPusherHelper::checkFit(Type const *type) {
+	switch (type->category()) {
+
+		case Type::Category::Integer: {
+			auto it = to<IntegerType>(type);
+			if (it->isSigned()) {
+				push(0, "FITS " + toString(it->numBits()));
+			} else {
+				push(0, "UFITS " + toString(it->numBits()));
+			}
+			break;
+		}
+
+		case Type::Category::FixedPoint: {
+			auto fp = to<FixedPointType>(type);
+			if (fp->isSigned()) {
+				push(0, "FITS " + toString(fp->numBits()));
+			} else {
+				push(0, "UFITS " + toString(fp->numBits()));
+			}
+			break;
+		}
+
+		default:
+			solUnimplemented("");
+			break;
+	}
+
 }
 
 void StackPusherHelper::push(const CodeLines &codeLines) {
@@ -1123,14 +1426,24 @@ void StackPusherHelper::push(const CodeLines &codeLines) {
 	}
 }
 
-void StackPusherHelper::pushPrivateFunctionOrMacroCall(const int stackDelta, const string &fname) {
+void StackPusherHelper::pushMacroCallInCallRef(int stackDelta, const string& fname) {
+	startCallRef();
 	push(stackDelta, "CALL $" + fname + "$");
+	endContinuation();
+}
+
+void StackPusherHelper::pushPrivateFunctionOrMacroCall(const int stackDelta, const string &fname) {
+	if (boost::ends_with(fname, "_macro")) {
+		pushMacroCallInCallRef(stackDelta, fname);
+	} else {
+		push(stackDelta, "CALL $" + fname + "$");
+	}
 }
 
 void StackPusherHelper::pushCall(const string &functionName, const FunctionType *ft) {
 	int params  = ft->parameterTypes().size();
 	int retVals = ft->returnParameterTypes().size();
-	push(-params + retVals, "CALL $" + functionName + "$");
+	pushPrivateFunctionOrMacroCall(-params + retVals, functionName);
 }
 
 void StackPusherHelper::drop(int cnt) {
@@ -1255,7 +1568,7 @@ void StackPusherHelper::exchange(int i, int j) {
 		exchange(0, j);
 		exchange(0, i);
 	} else {
-		solAssert(false, "");
+		solUnimplemented("");
 	}
 }
 
@@ -1269,7 +1582,7 @@ TypePointer StackPusherHelper::parseIndexType(Type const *type) {
 	if (auto currencyType = to<ExtraCurrencyCollectionType>(type)) {
 		return currencyType->keyType();
 	}
-	solAssert(false, "");
+	solUnimplemented("");
 }
 
 TypePointer StackPusherHelper::parseValueType(IndexAccess const &indexAccess) {
@@ -1296,35 +1609,6 @@ bool StackPusherHelper::tryAssignParam(Declaration const *name) {
 	return false;
 }
 
-void StackPusherHelper::ensureValueFitsType(const ElementaryTypeNameToken &typeName, const ASTNode &node) {
-	push(0, ";; " + typeName.toString());
-	switch (typeName.token()) {
-		case Token::IntM:
-			push(0, "FITS " + toString(typeName.firstNumber()));
-			break;
-		case Token::UIntM:
-			push(0, "UFITS " + toString(typeName.firstNumber()));
-			break;
-		case Token::BytesM:
-			push(0, "UFITS " + toString(8 * typeName.firstNumber()));
-			break;
-		case Token::Int:
-			push(0, "FITS 256");
-			break;
-		case Token::Address:
-			// Address is a slice
-			break;
-		case Token::UInt:
-			push(0, "UFITS 256");
-			break;
-		case Token::Bool:
-			push(0, "FITS 1");
-			break;
-		default:
-			cast_error(node, "Unimplemented casting");
-	}
-}
-
 void StackPusherHelper::prepareKeyForDictOperations(Type const *key, bool doIgnoreBytes) {
 	// stack: key
 	if (isStringOrStringLiteralOrBytes(key) || key->category() == Type::Category::TvmCell) {
@@ -1336,11 +1620,11 @@ void StackPusherHelper::prepareKeyForDictOperations(Type const *key, bool doIgno
 		sc.tupleToBuilder();
 		push(0, "ENDC");
 		push(0, "CTOS");
+	} else {
 	}
 }
 
-std::pair<std::string, int>
-StackPusherHelper::int_msg_info(const std::set<int> &isParamOnStack, const std::map<int, std::string> &constParams) {
+int StackPusherHelper::int_msg_info(const std::set<int> &isParamOnStack, const std::map<int, std::string> &constParams) {
 	// int_msg_info$0  ihr_disabled:Bool  bounce:Bool(#1)  bounced:Bool
 	//                 src:MsgAddress  dest:MsgAddressInt(#4)
 	//                 value:CurrencyCollection(#5,#6)  ihr_fee:Grams  fwd_fee:Grams
@@ -1365,6 +1649,7 @@ StackPusherHelper::int_msg_info(const std::set<int> &isParamOnStack, const std::
 			bitString += std::string(zeroes[param], '0');
 			solAssert(param != TvmConst::int_msg_info::dest, "");
 		} else {
+			maxBitStringSize += bitString.size();
 			appendToBuilder(bitString);
 			bitString = "";
 			switch (param) {
@@ -1385,42 +1670,58 @@ StackPusherHelper::int_msg_info(const std::set<int> &isParamOnStack, const std::
 					break;
 				case TvmConst::int_msg_info::currency:
 					push(-1, "STDICT");
+					++maxBitStringSize;
 					break;
 				default:
-					solAssert(false, "");
+					solUnimplemented("");
 			}
 		}
 	}
 	maxBitStringSize += bitString.size();
-	return {bitString, maxBitStringSize};
+	appendToBuilder(bitString);
+	bitString = "";
+	return maxBitStringSize;
 }
 
-std::pair<std::string, int>
-StackPusherHelper::ext_msg_info(const set<int> &isParamOnStack) {
+int StackPusherHelper::ext_msg_info(const set<int> &isParamOnStack, bool isOut = true) {
+	// ext_in_msg_info$10 src:MsgAddressExt dest:MsgAddressInt
+	// import_fee:Grams = CommonMsgInfo;
+	//
 	// ext_out_msg_info$11 src:MsgAddressInt dest:MsgAddressExt
 	// created_lt:uint64 created_at:uint32 = CommonMsgInfo;
 
-	const std::vector<int> zeroes {2, 2,
-								   64, 32};
-	std::string bitString = "11";
+	std::vector<int> zeroes {2, 2};
+	if (isOut) {
+		zeroes.push_back(64);
+		zeroes.push_back(32);
+	} else {
+		zeroes.push_back(4);
+	}
+	std::string bitString = isOut ? "11" : "10";
 	int maxBitStringSize = 0;
 	push(+1, "NEWC");
 	for (int param = 0; param < static_cast<int>(zeroes.size()); ++param) {
 		if (isParamOnStack.count(param) == 0) {
 			bitString += std::string(zeroes.at(param), '0');
 		} else {
+			maxBitStringSize += bitString.size();
 			appendToBuilder(bitString);
 			bitString = "";
 			if (param == TvmConst::ext_msg_info::dest) {
 				push(-1, "STSLICE");
 				maxBitStringSize += AddressInfo::maxBitLength();
+			} else if (param == TvmConst::ext_msg_info::src) {
+				push(-1, "STB");
+				maxBitStringSize += TvmConst::ExtInboundSrcLength;
 			} else {
-				solAssert(false, "");
+				solUnimplemented("");
 			}
 		}
 	}
 	maxBitStringSize += bitString.size();
-	return {bitString, maxBitStringSize};
+	appendToBuilder(bitString);
+	bitString = "";
+	return maxBitStringSize;
 }
 
 
@@ -1446,7 +1747,7 @@ void StackPusherHelper::appendToBuilder(const std::string &bitString) {
 
 void StackPusherHelper::checkOptionalValue() {
 	push(-1 + 1, "ISNULL");
-	push(-1, "THROWIF " + toString(TvmConst::Message::Exception::GetOptionalException));
+	push(-1, "THROWIF " + toString(TvmConst::RuntimeException::GetOptionalException));
 }
 
 void StackPusherHelper::stzeroes(int qty) {
@@ -1486,24 +1787,29 @@ void StackPusherHelper::sendIntMsg(const std::map<int, Expression const *> &expr
 		isParamOnStack.insert(param);
 		TVMExpressionCompiler{*this}.compileNewExpr(expr);
 	}
-	sendMsg(isParamOnStack, constParams, appendBody, nullptr, pushSendrawmsgFlag, true);
+	sendMsg(isParamOnStack, constParams, appendBody, nullptr, pushSendrawmsgFlag);
 }
 
-void StackPusherHelper::sendMsg(const std::set<int>& isParamOnStack,
+
+
+void StackPusherHelper::prepareMsg(const std::set<int>& isParamOnStack,
 								const std::map<int, std::string> &constParams,
 								const std::function<void(int)> &appendBody,
 								const std::function<void()> &appendStateInit,
-								const std::function<void()> &pushSendrawmsgFlag,
-								bool isInternalMessage) {
-	std::string bitString;
-	int msgInfoSize;
-	if (isInternalMessage) {
-		std::tie(bitString, msgInfoSize) = int_msg_info(isParamOnStack, constParams);
-	} else {
-		std::tie(bitString, msgInfoSize) = ext_msg_info(isParamOnStack);
+								MsgType messageType) {
+	int msgInfoSize = 0;
+	switch (messageType) {
+		case MsgType::Internal:
+			msgInfoSize = int_msg_info(isParamOnStack, constParams);
+			break;
+		case MsgType::ExternalOut:
+			msgInfoSize = ext_msg_info(isParamOnStack);
+			break;
+		case MsgType::ExternalIn:
+			msgInfoSize = ext_msg_info(isParamOnStack, false);
+			break;
 	}
 	// stack: builder
-	appendToBuilder(bitString);
 
 	if (appendStateInit) {
 		// stack: values... builder
@@ -1527,6 +1833,15 @@ void StackPusherHelper::sendMsg(const std::set<int>& isParamOnStack,
 
 	// stack: builder'
 	push(0, "ENDC"); // stack: cell
+}
+
+void StackPusherHelper::sendMsg(const std::set<int>& isParamOnStack,
+								const std::map<int, std::string> &constParams,
+								const std::function<void(int)> &appendBody,
+								const std::function<void()> &appendStateInit,
+								const std::function<void()> &pushSendrawmsgFlag,
+								MsgType messageType) {
+	prepareMsg(isParamOnStack, constParams, appendBody, appendStateInit, messageType);
 	if (pushSendrawmsgFlag) {
 		pushSendrawmsgFlag();
 	} else {
@@ -1549,6 +1864,7 @@ bool TVMStack::isParam(Declaration const *name) const {
 }
 
 void TVMStack::add(Declaration const *name, bool doAllocation) {
+	solAssert(name != nullptr, "");
 	solAssert(m_params.count(name) == 0, "");
 	m_params[name] = doAllocation? m_size++ : m_size - 1;
 }
@@ -1596,6 +1912,21 @@ void CodeLines::startContinuation() {
 	++tabQty;
 }
 
+void CodeLines::startIfRef() {
+	push("IFREF {");
+	++tabQty;
+}
+
+void CodeLines::startIfNotRef() {
+	push("IFNOTREF {");
+	++tabQty;
+}
+
+void CodeLines::startCallRef() {
+	push("CALLREF {");
+	++tabQty;
+}
+
 void CodeLines::endContinuation() {
 	--tabQty;
 	push("}");
@@ -1622,19 +1953,9 @@ void CodeLines::append(const CodeLines &oth) {
 	}
 }
 
-void TVMCompilerContext::addFunction(FunctionDefinition const *_function) {
-	if (!_function->isConstructor()) {
-		string name = functionName(_function);
-		m_functions[name] = _function;
-	}
-}
-
 void TVMCompilerContext::initMembers(ContractDefinition const *contract) {
 	solAssert(!m_contract, "");
 	m_contract = contract;
-	for (const auto &pair : getContractFunctionPairs(contract)) {
-		m_function2contract.insert(pair);
-	}
 
 	for (ContractDefinition const* base : contract->annotation().linearizedBaseContracts) {
 		for (FunctionDefinition const* f : base->definedFunctions()) {
@@ -1643,13 +1964,8 @@ void TVMCompilerContext::initMembers(ContractDefinition const *contract) {
 	}
 
 	ignoreIntOverflow |= m_pragmaHelper.haveIgnoreIntOverflow();
-	for (const auto f : getContractFunctions(contract)) {
-		if (isPureFunction(f))
-			continue;
-		addFunction(f);
-	}
 	for (VariableDeclaration const *variable: notConstantStateVariables()) {
-		m_stateVarIndex[variable] = TvmConst::C7::FirstIndexForVariables +  + m_stateVarIndex.size();
+		m_stateVarIndex[variable] = TvmConst::C7::FirstIndexForVariables + m_stateVarIndex.size();
 	}
 }
 
@@ -1702,14 +2018,14 @@ bool TVMCompilerContext::haveTimeInAbiHeader() const {
 	if (m_pragmaHelper.abiVersion() == 2) {
 		return m_pragmaHelper.haveTime() || afterSignatureCheck() == nullptr;
 	}
-	solAssert(false, "");
+	solUnimplemented("");
 }
 
 bool TVMCompilerContext::isStdlib() const {
 	return m_contract->name() == "stdlib";
 }
 
-string TVMCompilerContext::getFunctionInternalName(FunctionDefinition const *_function) const {
+string TVMCompilerContext::getFunctionInternalName(FunctionDefinition const* _function) const {
 	if (isStdlib()) {
 		return _function->name();
 	}
@@ -1719,7 +2035,12 @@ string TVMCompilerContext::getFunctionInternalName(FunctionDefinition const *_fu
 	if (_function->isFallback()) {
 		return "fallback";
 	}
-	return _function->name() + "_internal";
+
+	string name = _function->name() + "_internal";
+	if (_function != getContractFunctions(getContract(), _function->name()).back()) {
+		name = _function->annotation().contract->name() + "_" + _function->name();
+	}
+	return name;
 }
 
 string TVMCompilerContext::getFunctionExternalName(FunctionDefinition const *_function) {
@@ -1734,21 +2055,8 @@ string TVMCompilerContext::getFunctionExternalName(FunctionDefinition const *_fu
 	return fname;
 }
 
-bool TVMCompilerContext::isPureFunction(FunctionDefinition const *f) const {
-	const auto& vec = getContract(f)->annotation().unimplementedFunctions;
-	return std::find(vec.cbegin(), vec.cend(), f) != vec.end();
-}
-
 const ContractDefinition *TVMCompilerContext::getContract() const {
 	return m_contract;
-}
-
-const ContractDefinition *TVMCompilerContext::getContract(const FunctionDefinition *f) const {
-	return m_function2contract.at(f);
-}
-
-const FunctionDefinition *TVMCompilerContext::getLocalFunction(const string& fname) const {
-	return get_from_map(m_functions, fname, nullptr);
 }
 
 bool TVMCompilerContext::ignoreIntegerOverflow() const {
@@ -1772,15 +2080,24 @@ void TVMCompilerContext::addLib(FunctionDefinition const* f) {
 	m_libFunctions.insert(f);
 }
 
-std::vector<std::pair<VariableDeclaration const*, int>> TVMCompilerContext::getStaticVaribles() const {
+std::vector<std::pair<VariableDeclaration const*, int>> TVMCompilerContext::getStaticVariables() const {
 	int shift = 0;
-	std::vector<std::pair<VariableDeclaration const*, int>> vect;
-	for (VariableDeclaration const* v : m_contract->stateVariables()) {
+	std::vector<std::pair<VariableDeclaration const*, int>> res;
+	for (VariableDeclaration const* v : notConstantStateVariables()) {
 		if (v->isStatic()) {
-			vect.emplace_back(v, TvmConst::C4::PersistenceMembersStartIndex + shift++);
+			res.emplace_back(v, TvmConst::C4::PersistenceMembersStartIndex + shift++);
 		}
 	}
-	return vect;
+	return res;
+}
+
+void TVMCompilerContext::addInlineFunction(const std::string& name, const CodeLines& code) {
+	solAssert(m_inlinedFunctions.count(name) == 0, "");
+	m_inlinedFunctions[name] = code;
+}
+
+CodeLines TVMCompilerContext::getInlinedFunction(const std::string& name) {
+	return m_inlinedFunctions.at(name);
 }
 
 void StackPusherHelper::pushNull() {
@@ -1859,22 +2176,22 @@ void StackPusherHelper::pushDefaultValue(Type const* type, bool isResultBuilder)
 			}
 			break;
 		case Type::Category::Function: {
-			// TODO store function as function id - uint
-			solAssert(!isResultBuilder, "");
-			auto functionType = to<FunctionType>(type);
-			StackPusherHelper pusherHelper(&ctx(), functionType->parameterTypes().size());
-			pusherHelper.drop(functionType->parameterTypes().size());
-			for (const TypePointer &param : functionType->returnParameterTypes()) {
-				pusherHelper.pushDefaultValue(param);
+			pushInt(TvmConst::FunctionId::DefaultValueForFunctionType);
+			if (isResultBuilder) {
+				solUnimplemented("TODO");
+				push(+1, "NEWC");
+				push(-1, "STU 32");
 			}
-			pushCont(pusherHelper.code());
 			break;
 		}
 		case Type::Category::Optional:
 			push(+1, "NULL");
 			break;
+		case Type::Category::FixedPoint:
+			pushInt(0);
+			break;
 		default:
-			solAssert(false, "");
+			solUnimplemented("");
 	}
 }
 
@@ -1910,7 +2227,7 @@ public:
 				else if (op == StackPusherHelper::GetDictOperation::GetReplaceFromMapping)
 					opcode += "REPLACEGET";
 				else
-					solAssert(false, "");
+					solUnimplemented("");
 
 				bool didUseOpcodeWithRef = false;
 				switch (dataType) {
@@ -2010,6 +2327,15 @@ void StackPusherHelper::getDict(
 void StackPusherHelper::switchSelector() {
 	push(0, "PUSHINT 1");
 	push(0, "CALL 1");
+}
+
+void StackPusherHelper::byteLengthOfCell()
+{
+	pushInt(0xFFFFFFFF);
+	push(-2 + 3, "CDATASIZE");
+	drop(1);
+	dropUnder(1, 1);
+	push(-1 + 1, "RSHIFT 3");
 }
 
 

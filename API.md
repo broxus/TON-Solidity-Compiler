@@ -1,7 +1,7 @@
 # **TON Solidity API**
 
-TON Solidity compiler expands Solidity language with different API
-functions to facilitate TON contract development.
+TON Solidity compiler expands Solidity language with different API functions to facilitate TON
+contract development.
 
 ## Table of Contents
 
@@ -25,7 +25,11 @@ functions to facilitate TON contract development.
     * [\<TvmSlice\>.loadSigned()](#tvmsliceloadsigned)
     * [\<TvmSlice\>.loadUnsigned()](#tvmsliceloadunsigned)
     * [\<TvmSlice\>.loadTons()](#tvmsliceloadtons)
+    * [\<TvmSlice\>.loadSlice()](#tvmsliceloadslice)
     * [\<TvmSlice\>.decodeFunctionParams()](#tvmslicedecodefunctionparams)
+    * [\<TvmSlice\>.skip()](#tvmsliceskip)
+    * [\<TvmSlice\>.hasNBits(), \<TvmSlice\>.hasNRefs() and \<TvmSlice\>.hasNBitsAndRefs()](#tvmslicehasnbits-tvmslicehasnrefs-and-tvmslicehasnbitsandrefs)
+    * [\<TvmSlice\>.compare()](#tvmslicecompare)
   * [TvmBuilder](#tvmbuilder)
     * [\<TvmBuilder\>.toSlice()](#tvmbuildertoslice)
     * [\<TvmBuilder\>.toCell()](#tvmbuildertocell)
@@ -57,8 +61,7 @@ functions to facilitate TON contract development.
   * [string](#string)
     * [\<string\>.byteLength()](#stringbytelength)
     * [\<string\>.substr()](#stringsubstr)
-    * [string(int)](#stringint)
-    * [hexstring()](#hexstring)
+    * [\<string\>.append()](#stringappend)
     * [format()](#format)
     * [stoi()](#stoi)
   * [bytes](#bytes)
@@ -89,7 +92,7 @@ functions to facilitate TON contract development.
   * [mapping](#mapping)
     * [\<mapping\>.operator[]](#mappingoperator)
     * [\<mapping\>.at()](#mappingat)
-    * [\<mapping\>.min() and mapping.max()](#mappingmin-and-mappingmax)
+    * [\<mapping\>.min() and \<mapping\>.max()](#mappingmin-and-mappingmax)
     * [\<mapping\>.next() and \<mapping\>.prev()](#mappingnext-and-mappingprev)
     * [\<mapping\>.nextOrEq() and \<mapping\>.prevOrEq()](#mappingnextoreq-and-mappingprevoreq)
     * [\<mapping\>.delMin() and \<mapping\>.delMax()](#mappingdelmin-and-mappingdelmax)
@@ -101,6 +104,8 @@ functions to facilitate TON contract development.
     * [\<mapping\>.getSet()](#mappinggetset)
     * [\<mapping\>.getAdd()](#mappinggetadd)
     * [\<mapping\>.getReplace()](#mappinggetreplace)
+  * [Fixed point number](#fixed-point-number)
+  * [Function type](#function-type)
   * [require, revert](#require-revert)
     * [require](#require)
     * [revert](#revert)
@@ -108,10 +113,12 @@ functions to facilitate TON contract development.
     * [Function call via library name](#function-call-via-library-name)
     * [Function call via object](#function-call-via-object)
 * [Pragmas](#pragmas)
+  * [pragma ton-solidity](#pragma-ton-solidity)
   * [pragma ignoreIntOverflow](#pragma-ignoreintoverflow)
   * [pragma AbiHeader](#pragma-abiheader)
   * [pragma msgValue](#pragma-msgvalue)
 * [State variables](#state-variables)
+  * [Keyword `constant`](#keyword-constant)
   * [Keyword `static`](#keyword-static)
   * [Keyword `public`](#keyword-public)
 * [Special contract functions](#special-contract-functions)
@@ -129,6 +136,7 @@ functions to facilitate TON contract development.
   * [extAddr](#extaddr)
   * [return](#return)
 * [External function calls](#external-function-calls)
+* [Delete variables](#delete-variables)
 * [API functions and members](#api-functions-and-members)
   * [**msg** namespace](#msg-namespace)
     * [msg.value](#msgvalue)
@@ -141,6 +149,7 @@ functions to facilitate TON contract development.
       * [tvm.accept()](#tvmaccept)
       * [tvm.commit()](#tvmcommit)
       * [tvm.log()](#tvmlog)
+      * [tvm.hexdump() and tvm.bindump()](#tvmhexdump-and-tvmbindump)
       * [tvm.setcode()](#tvmsetcode)
       * [tvm.transLT()](#tvmtranslt)
       * [tvm.configParam()](#tvmconfigparam)
@@ -162,14 +171,17 @@ functions to facilitate TON contract development.
       * [tvm.functionId()](#tvmfunctionid)
       * [tvm.encodeBody()](#tvmencodebody)
       * [tvm.exit() and tvm.exit1()](#tvmexit-and-tvmexit1)
+      * [tvm.buildExtMsg()](#tvmbuildextmsg)
   * [**math** namespace](#math-namespace)
-    * [math.min() and math.max()](#mathmin-and-mathmax)
+    * [math.min() math.max()](#mathmin-mathmax)
     * [math.minmax()](#mathminmax)
     * [math.abs()](#mathabs)
     * [math.modpow2()](#mathmodpow2)
     * [math.divr() math.divc()](#mathdivr-mathdivc)
     * [math.muldiv() math.muldivr() math.muldivc()](#mathmuldiv-mathmuldivr-mathmuldivc)
     * [math.muldivmod()](#mathmuldivmod)
+    * [math.divmod()](#mathdivmod)
+    * [math.sign()](#mathsign)
   * [**tx** namespace](#tx-namespace)
     * [tx.timestamp](#txtimestamp)
   * [**block** namespace](#block-namespace)
@@ -180,6 +192,10 @@ functions to facilitate TON contract development.
     * [rnd.setSeed](#rndsetseed)
     * [rnd.shuffle](#rndshuffle)
   * [selfdestruct](#selfdestruct)
+  * [sha256](#sha256)
+  * [gasToValue](#gastovalue)
+  * [valueToGas](#valuetogas)
+* [Solidity runtime errors](#solidity-runtime-errors)
 
 ## Detailed description
 
@@ -276,7 +292,7 @@ cell references in the distinct cells. If count of the distinct cells
 exceeds `n+1` then a cell overflow exception (8) is thrown.  
 Note that the returned `count of distinct cells` does not take into
 account the cell that contains the slice itself.  
-This function is a wrapper for opcode "SDATASIZE" ([TVM][1] - A.11.7).
+This function is a wrapper for opcode `SDATASIZE` ([TVM][1] - A.11.7).
 
 #### \<TvmSlice\>.dataSizeQ()
 
@@ -289,7 +305,7 @@ cell references in the distinct cells. If count of the distinct cells
 exceeds `n+1` then this function returns an `optional` that has no value.
 Note that the returned `count of distinct cells` does not take into
 account the cell that contains the slice itself.  
-This function is a wrapper for opcode "SDATASIZEQ" ([TVM][1] - A.11.7).
+This function is a wrapper for opcode `SDATASIZEQ` ([TVM][1] - A.11.7).
 
 ##### \<TvmSlice\>.bits()
 
@@ -322,14 +338,15 @@ otherwise function result is one plus the maximum of depths of the cells referre
 <TvmSlice>.decode(TypeA, TypeB, ...) returns (TypeA /*a*/, TypeB /*b*/, ...);
 ```
 
-Loads given types from the slice.  
-Example:
+Loads given types from the slice. Example:
 
 ```TVMSolidity
 TvmSlice slice = ...;
 (uint8 a, uint16 b) = slice.decode(uint8, uint16);
 (uint16 num0, uint32 num1, address addr) = slice.decode(uint16, uint32, address);
 ```
+
+See also: [\<TvmBuilder\>.store()](#tvmbuilderstore).
 
 ##### \<TvmSlice\>.loadRef()
 
@@ -371,24 +388,65 @@ Loads an unsigned integer with the given **bitSize** from the slice.
 
 Loads (deserializes) **VarUInteger 16** and returns an unsigned 128-bit integer. See [TL-B scheme][3].
 
+##### \<TvmSlice\>.loadSlice()
+
+```TVMSolidity
+<TvmSlice>.loadSlice(uint length) returns (TvmSlice);
+<TvmSlice>.loadSlice(uint length, uint refs) returns (TvmSlice);
+```
+
+Loads the first `length` bits and `refs` references from the slice into a separate slice.
+
 ##### \<TvmSlice\>.decodeFunctionParams()
 
 ```TVMSolidity
-// Decode public function parameters
+// Decode parameters of the public function which doesn't return values
 <TvmSlice>.decodeFunctionParams(functionName) returns (TypeA /*a*/, TypeB /*b*/, ...);
+
+// Decode parameters of the public function which returns values
+<TvmSlice>.decodeFunctionParams(functionName) returns (uint32 callbackFunctionId, TypeA /*a*/, TypeB /*b*/, ...);
 
 // Decode constructor parameters
 <TvmSlice>.decodeFunctionParams(ContractName) returns (TypeA /*a*/, TypeB /*b*/, ...);
 ```
 
-Decodes parameters of the function or constructor if
-contract type is provided. It's very convenient if there are many params
-and they don't fit in one cell. This function is usually used in
+Decodes parameters of the function or constructor (if contract type is provided). This function is usually used in
 **[onBounce](#onbounce)** function.
 
 See example of how to use **onBounce** function:
 
 * [onBounceHandler](https://github.com/tonlabs/samples/blob/master/solidity/16_onBounceHandler.sol)
+
+##### \<TvmSlice\>.skip()
+
+```TVMSolidity
+<TvmSlice>.skip(uint length);
+<TvmSlice>.skip(uint length, uint refs);
+```
+
+Skips the first `length` bits and `refs` references from the slice.
+
+##### \<TvmSlice\>.hasNBits(), \<TvmSlice\>.hasNRefs() and \<TvmSlice\>.hasNBitsAndRefs()
+
+```TVMSolidity
+<TvmSlice>.hasNBits(uint16 bits) returns (bool);
+<TvmSlice>.hasNRefs(uint8 bits) returns (bool);
+<TvmSlice>.hasNBitsAndRefs(uint16 bits, uint8 refs) returns (bool);
+```
+
+Checks whether the slice contains the specified amount of data bits and references.
+
+##### \<TvmSlice\>.compare()
+
+```TVMSolidity
+<TvmSlice>.compare(TvmSlice other) returns (int8);
+```
+
+Lexicographically compares the `slice` and `other` data bits of the root slice and returns result as an integer:
+
+* 1 - `slice` > `other`
+* 0 - `slice` == `other`
+* -1 - `slice` < `other`
 
 #### TvmBuilder
 
@@ -471,21 +529,10 @@ depths of cells referred to from the builder.
 ##### \<TvmBuilder\>.store()
 
 ```TVMSolidity
-<TvmBuilder>.store(/*list_of_variables*/);
+<TvmBuilder>.store(/*list_of_values*/);
 ```
 
-Stores variables in the builder. Available types:
-
-* integer
-* address
-* TvmSlice
-* TvmBuilder
-* TvmCell
-* mapping
-* struct
-* array
-
-Example:
+Stores values in the builder. Example:
 
 ```TVMSolidity
 uint8 a = 11;
@@ -493,6 +540,8 @@ int16 b = 22;
 TvmBuilder builder;
 builder.store(a, b, uint(33));
 ```
+
+See also: [\<TvmSlice\>.decode()](#tvmslicedecode).
 
 ##### \<TvmBuilder\>.storeSigned()
 
@@ -590,8 +639,7 @@ Checks whether **opt** contains a value.
 <optional(Type)>.get() returns (Type);
 ```
 
-Returns the contained value, if the optional contains one,
-Otherwise, throws an exception.
+Returns the contained value, if the optional contains one. Otherwise, throws an exception.
 
 ##### \<optional(Type)\>.set()
 
@@ -731,8 +779,7 @@ byte a0 = byteArray[index];
 <bytes>.length returns (uint)
 ```
 
-Returns length of the byte array.  
-Warning: if length of the array is greater than 127 then function returns 127.
+Returns length of the byte array.
 
 ##### \<bytes\>.toSlice
 
@@ -770,52 +817,25 @@ TON Solidity compiler expands **string** type with the following functions:
 <string>.byteLength() returns (uint8);
 ```
 
-Returns byte length of the string data.  
-Warning: if length of the string is greater than 127 then function returns 127.
+Returns byte length of the string data.
 
 ##### \<string\>.substr()
 
 ```TVMSolidity
-<string>.substr(uint8 from, uint8 count) returns (string);
+<string>.substr(uint from, int count) returns (string);
 ```
 
 Returns a substring starting from the byte with number **from** with byte length **count**.  
-Warning: **from** must be in range 0 to 127 inclusive and **from + count** must be in range 1 to 127 inclusive.
+!Note: if count is set to -1, then the new string will be cut from the **from** byte to the end
+of the string.
 
-#### string(int)
-
-```TvmSolidity
-string(int value) returns (string);
-```
-
-Converts an integer to a decimal string.  
-Warning: this function consumes too much gas, that's why it's better not to use it onchain.
-Example:
+##### \<string\>.append()
 
 ```TVMSolidity
-uint n = 123;
-string b = string(n);
-require(a == b, 101);
-require("6465321365465" == string(6465321365465), 102);
-require("-1113" == string(-1113));
+<string>.append(string tail);
 ```
 
-#### hexstring()
-
-```TvmSolidity
-hexstring(Type value) returns (string);
-```
-
-Converts an integer or address into a hex string.  
-Warning: this function consumes too much gas, that's why it's better not to use it onchain.
-Example:
-
-```TVMSolidity
-require(hexstring(0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) == "7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 101);
-require(hexstring(255) == "FF", 102);
-require(hexstring(-65535) == "-FFFF", 103);
-require(hexstring(address.makeAddrStd(127,0x7fffffffffffffffffffffffffffffffffffffffffffffffff123456789abcde)) == "7F:7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF123456789ABCDE", 104);
-```
+Modifies the string by concatenating **tail** string to the end of the string.
 
 #### format()
 
@@ -824,16 +844,39 @@ format(string template, TypeA a, TypeB b, ...) returns (string);
 ```
 
 Builds a string with arbitrary parameters. Empty placeholder {} can be filled with integer
-(in decimal view) or address. The only specified format is {:x} to fill with integer in a hexadecimal view.  
-**Note**\: total length of the string shouldn't exceed 127.  
+(in decimal view), address, string or fixed point number. Fixed point number is printed
+based on its type (`fixedMxN` is printed with `N` digits after dot).  
+Placeholder should be specified in such formats:
+
+* `"{}"` - empty placeholder
+* `"{:[0]<width>{"x","d","X","t"}}"` - placeholder for integers. Fills num with 0 if format starts with "0".
+Formats integer to have specified `width`. Can format integers in decimal ("d" postfix), lower hex ("x")
+or upper hex ("X") form. Format "t" prints number as a fixed point Ton sum (in nanotons).
+
 Warning: this function consumes too much gas, that's why it's better not to use it onchain.
 Example:
 
 ```TVMSolidity
-string str = format("Hello {} 0x{:x} {}  {}.{} tons", 123, 255, address.makeAddrStd(-33,0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF123456789ABCDE), 100500, 32);
-require(str == "Hello 123 0xFF -21:7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF123456789ABCDE  100500.32 tons", 101);
+string str = format("Hello {} 0x{:X} {}  {}.{} tons", 123, 255, address.makeAddrStd(-33,0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF123456789ABCDE), 100500, 32);
+require(str == "Hello 123 0xFF -21:7fffffffffffffffffffffffffffffffffffffffffffffffff123456789abcde  100500.32 tons", 101);
 require(format("Hello {}", 123) == "Hello 123", 102);
-require(format("Hello 0x{:x}", 123) == "Hello 0x7B", 103);
+require(format("Hello 0x{:X}", 123) == "Hello 0x7B", 103);
+require(format("{}", -123) == "-123", 103);
+require(format("{}", address.makeAddrStd(127,0)) == "7f:0000000000000000000000000000000000000000000000000000000000000000", 104);
+require(format("{}", address.makeAddrStd(-128,0)) == "-80:0000000000000000000000000000000000000000000000000000000000000000", 105);
+require(format("{:6}", 123) == "   123", 106);
+require(format("{:06}", 123) == "000123", 107);
+require(format("{:06d}", 123) == "000123", 108);
+require(format("{:06X}", 123) == "00007B", 109);
+require(format("{:6x}", 123) == "    7b", 110);
+uint128 a = 1 ton;
+require(format("{:t}", a) == "1.000000000", 101);
+a = 123;
+require(format("{:t}", a) == "0.000000123", 103);
+fixed32x3 v = 1.5;
+require(format("{}", v) == "1.500", 106);
+fixed256x10 vv = -987123.4567890321;
+require(format("{}", vv) == "-987123.4567890321", 108);
 ```
 
 #### stoi()
@@ -877,7 +920,7 @@ uint address_value;
 address addrStd = address(address_value);
 ```
 
-This function constructs an **address** of type **addr_std** with zero workchain id and given address value.
+Constructs an **address** of type **addr_std** with zero workchain id and given address value.
 
 ##### address.makeAddrStd()
 
@@ -887,7 +930,7 @@ uint address;
 address addrStd = address.makeAddrStd(wid, address);
 ```
 
-This function constructs an **address** of type **addr_std** with given workchain id **wid** and value **address_value**.
+Constructs an **address** of type **addr_std** with given workchain id **wid** and value **address_value**.
 
 ##### address.makeAddrNone()
 
@@ -895,7 +938,7 @@ This function constructs an **address** of type **addr_std** with given workchai
 address addrNone = address.makeAddrNone();
 ```
 
-This function constructs an **address** of type **addr_none**.
+Constructs an **address** of type **addr_none**.
 
 ##### address.makeAddrExtern()
 
@@ -905,7 +948,7 @@ uint bitCnt;
 address addrExtern = address.makeAddrExtern(addrNumber, bitCnt);
 ```
 
-This function constructs an **address** of type **addr_extern** with given **value** with **bitCnt** bit length.
+Constructs an **address** of type **addr_extern** with given **value** with **bitCnt** bit length.
 
 ##### Members
 
@@ -992,46 +1035,61 @@ Check whether this **address** is of type **addr_none**.
 <address>.unpack() returns (int8 /*wid*/, uint256 /*value*/);
 ```
 
-Unpacks **addr_std** and returns workchain id **wid** and address **value**.
+If `<address>` is **addr_std** then returns workchain id **wid** and address **value**. Otherwise, throws exception.
 
 ##### \<address\>.transfer()
 
 ```TVMSolidity
-<address>.transfer(uint128 value, ExtraCurrencyCollection currencies, bool bounce, uint16 flag, TvmCell body);
+<address>.transfer(uint128 value, bool bounce, uint16 flag, TvmCell body, ExtraCurrencyCollection currencies);
 ```
 
 Sends an internal outbound message to defined address. Function parameters:  
 
 * `value` (`uint128`) - amount of nanotons sent to the address.
-* `currencies` (`ExtraCurrencyCollection`) - additional currencies sent to the address. Defaults to an empty set.
-* `bounce` (`bool`) - if it's set and transaction (generated by the internal outbound message) falls (only at computing phase, not at action phase!) then funds will be returned. Otherwise (flag isn't set or transaction terminated successfully) the address accepts the funds even if the account doesn't exist or is frozen. Defaults to `true`.
-* `flag` (`uint16`) - sets flag which used to send the internal outbound message. See [TVM A.11.10][1] for more details. Defaults to `1`.
-* `body` (`TvmCell`) -  body (payload) attached to the internal message. Defaults to an empty TvmCell.
+* `currencies` (`ExtraCurrencyCollection`) - additional currencies sent to the address. Defaults to
+an empty set.
+* `bounce` (`bool`) - if it's set and transaction (generated by the internal outbound message) falls
+(only at computing phase, not at action phase!) then funds will be returned. Otherwise (flag isn't
+set or transaction terminated successfully) the address accepts the funds even if the account
+doesn't exist or is frozen. Defaults to `true`.
+* `flag` (`uint16`) - sets flag which used to send the internal outbound message. Defaults to `0`.
+* `body` (`TvmCell`) -  body (payload) attached to the internal message. Defaults to an empty
+TvmCell.
 
 All parameters can be omitted, except ``value``.
 
+Possible values of parameter `flag`:
+* `0` - carries funds equal to parameter `value` to destination. Forward fee is subtracted from
+parameter `value`.
+* `128` - carries all the remaining balance of the current smart contract. Parameter `value` is
+ignored. The contract's balance will be equal to zero.
+* `64` - carries funds equal to parameter `value` and all the remaining value of the inbound message.
+
+Also parameter `flag` can be modified:
+* `flag + 1` - means that the sender wants to pay transfer fees separately from contract's balance.
+* `flag + 2` - means that any errors arising while processing this message during the action phase
+should be ignored.
+* `flag + 32` - means that the current account must be destroyed if its resulting balance is zero.
+For example, `flag: 128 + 32` used to send all balance and destroy the contract.
+
+In order to clarify using flags see [this sample](https://github.com/tonlabs/samples/blob/master/solidity/20_bomber.sol).
+
 ```TVMSolidity
-address addr = ...;
+address dest = ...;
 uint128 value = ...;
 bool bounce = ...;
 uint16 flag = ...;
 TvmCell body = ...;
 ExtraCurrencyCollection c = ...;
+// sequential order of parameters
 addr.transfer(value);
 addr.transfer(value, bounce);
 addr.transfer(value, bounce, flag);
 addr.transfer(value, bounce, flag, body);
 addr.transfer(value, bounce, flag, body, c);
-```
-
-Another example:
-
-```TVMSolidity
-TvmCell cell = ...;
-ExtraCurrencyCollection c = ...;
-address destination = msg.sender;
+// using named parameters
 destination.transfer({value: 1 ton, bounce: false, flag: 128, body: cell, currencies: c});
-destination.transfer({value: 1 ton, bounce: false, flag: 128, body: cell});
+destination.transfer({bounce: false, value: 1 ton, flag: 128, body: cell});
 ```
 
 See example of usage `address.transfer()`:
@@ -1052,6 +1110,9 @@ Address, bytes, string, bool, contract, enum, fixed bytes, integer and struct ty
 be used as **KeyType**. Struct type can be used as **KeyType** only if it contains only
 integer, boolean, fixed bytes or enum types and fits ~1023 bit. Example of mapping which
 has a struct as a **KeyType**:
+
+If you used `mapping(KeyType => TvmSlice) map;` be sure that sum of bit length of `KeyType`
+and bit length `TvmSlice` is less than 1023 bit.
 
 ```TVMSolidity
 struct Point {
@@ -1094,7 +1155,7 @@ if key is not in the mapping.
 Returns the item of ValueType with **index** key. Throws an exception if key
 is not in the mapping.
 
-##### \<mapping\>.min() and mapping.max()
+##### \<mapping\>.min() and \<mapping\>.max()
 
 ```TVMSolidity
 <map>.min() returns (optional(KeyType, ValueType));
@@ -1228,6 +1289,49 @@ in the mapping, otherwise returns an empty optional.
 Sets the value associated with **key**, but only if **key** presents in the mapping.
 On success, returns an optional with the old value associated with the **key**.
 Otherwise, returns an empty optional.
+
+#### Fixed point number
+
+`fixed` / `ufixed`: Signed and unsigned fixed point number of various sizes. Keywords `ufixedMxN`
+and `fixedMxN`, where `M` represents the number of bits taken by the type and `N` represents how
+many decimal points are available. `M` must be divisible by 8 and goes from 8 to 256 bits. `N` must
+be between 0 and 80, inclusive. `ufixed` and `fixed` are aliases for `ufixed128x18` and
+`fixed128x18`, respectively.
+
+Operators:
+
+ * Comparisons: `<=`, `<`, `==`, `!=`, `>=`, `>` (evaluate to bool)
+ * Arithmetic operators: `+`, `-`, unary `-`, `*`, `/`, `%` (modulo)
+ * Math operations: [math.min(), math.max()](#mathmin-mathmax), [math.minmax()](#mathminmax),
+[math.abs()](#mathabs), [math.divr() math.divc()](#mathdivr-mathdivc)
+
+#### Function type
+
+Function types are the types of functions. Variables of function type can be assigned from functions
+and function parameters of function type can be used to pass functions to and return functions from
+function calls.
+
+If unassigned variable of function type is called then exception with code 65 is thrown.
+
+```TVMSolidity
+function getSum(int a, int b) internal pure returns (int) {
+    return a + b;
+}
+
+function getSub(int a, int b) internal pure returns (int) {
+    return a - b;
+}
+
+function process(int a, int b, uint8 mode) public returns (int) {
+    function (int, int) returns (int) fun;
+    if (mode == 0) {
+        fun = getSum;
+    } else if (mode == 1) {
+        fun = getSub;
+    }
+    return fun(a, b); // if `fun` isn't initialized then exception is thrown 
+}
+```
 
 #### require, revert
 
@@ -1395,6 +1499,26 @@ the pragma to all your files if you want enable it in your whole project.
 If you import another file, the pragma from that file is not
 automatically applied to the importing file.
 
+#### pragma ton-solidity
+
+```TVMSolidity
+pragma ton-solidity >= 0.35.5; // Check compiler version is at least 0.35.5
+```
+
+```TVMSolidity
+pragma ton-solidity ^ 0.35.5; // Check compiler version is at least 0.35.5 and less 0.36.0
+```
+
+```TVMSolidity
+pragma ton-solidity < 0.35.5; // Check compiler version is less 0.35.5
+```
+
+```TVMSolidity
+pragma ton-solidity >= 0.35.5 < 0.35.7; // Check compiler version equal to 0.35.5 or 0.35.6
+```
+
+It's used to reject compilation source file with some versions of the compiler.
+
 #### pragma ignoreIntOverflow
 
 ```TVMSolidity
@@ -1444,13 +1568,23 @@ pragma msgValue 10_000_000_123;
 
 ### State variables
 
+#### Keyword `constant`
+
+For `constant` variables, the value has to be a constant at compile time and this value is substituted where the variable is used. The value has to be assigned where the variable is declared. Example:
+
+```TVMSolidity
+contract MyContract {
+	uint constant cost = 100;
+	uint constant cost2 = cost + 200;
+	address constant dest = address.makeAddrStd(-1, 0x89abcde);
+}
+```
+
 #### Keyword `static`
 
 Static state variables are used in generation of the contract origin state.
 Such variables can be set while deploying contract from contract
-(onchain) or by tvm-linker (offchain).
-
-Example:
+(onchain) or by tvm-linker (offchain). Example:
 
 ```TVMSolidity
 contract C {
@@ -1460,8 +1594,8 @@ contract C {
 ```
 
 See also:  
-[`code` option usage](#code-option-usage)  
-[New contract address problem](#new-contract-address-problem)
+ * [`code` option usage](#code-option-usage)
+ * [New contract address problem](#new-contract-address-problem)
 
 #### Keyword `public`
 
@@ -1483,14 +1617,16 @@ contract C {
 
 #### receive
 
-On plain value transfer **receive** function is called. See [\<address\>.transfer()](#addresstransfer). If there is no **receive** function in contract than the contract has an implicit empty **receive** function.
+On plain value transfer **receive** function is called. See [\<address\>.transfer()](#addresstransfer).  
+If there is no **receive** function in contract then the contract has an implicit empty **receive**  
+function.
 
 Example:
 
 ```TVMSolidity
 contract Sink {
     uint counter = 0;
-    receive() external payable {
+    receive() external {
         ++counter;
     }
 }
@@ -1498,7 +1634,8 @@ contract Sink {
 
 ##### fallback
 
-**fallback** function is called when a body of an inbound message contains invalid function id.
+**fallback** function is called when a body of an inbound internal/external message contains invalid
+function id. If in the contract there is no fallback function then exception is thrown.
 
 Example:
 
@@ -1670,18 +1807,49 @@ emit EventName(arguments);
 
 #### return
 
-Public or external functions (called by external message) send an
-external message on return. Destination address of that message is
-the source address of the inbound external message.
+```TVMSolidity
+function f(uint n) public pure {
+    return n <= 1? 1 : n * f(n - 1);
+}
+
+function f(uint n) public responsible pure {
+    return{value: 0, flag: 64} n <= 1? 1 : n * f(n - 1);
+}
+```
+
+If public/external function is called by external message then `return` statement generates an
+external message which has destination address set to the source address of the inbound external
+message. All options in the return statement are ignored.  
+If public/external function is called by internal message and the function is marked as responsible
+then an internal message is generated.  
+And if public/external function is called by internal message and the function isn't marked as
+responsible then return statement has no effect.  
+`value`, `bounce`, `flag` and `currencies` options are used to create the message. Some options can
+be omitted. See [\<address\>.transfer()](#addresstransfer) where this options are described and
+their default values.
+
+**Note**: if above function `f` is called with `n = 5` and internal/external message must be
+generated then only one message is sent with result `120` (120 = 5 * 4 * 3 * 2 * 1).
+
+See also: [External function calls](#external-function-calls).
 
 ### External function calls
 
-TON Solidity compiler allows to specify different parameters of the
-outbound internal message which is sent via external function call.
-`value`, `currencies`, `bounce` or `flag` options can be set
-(NOT `body` option). See [\<address\>.transfer()](#addresstransfer) where this options are described.
+TON Solidity compiler allows to specify different parameters of the outbound internal message which
+is sent via external function call. Note, that all external function calls are asynchronous, so
+callee function will be called after termination of current transaction.  
+`value`, `currencies`, `bounce` or `flag` options can be set. See [\<address\>.transfer()](#addresstransfer)
+where this options are described.  
+**Note:** if `value` isn't set then default value is equal to 0.01 ton or 10^7 nanoton. It's equal
+to 10_000 units of gas in workchain).  
+If callee function returns some value and marked as `responsible` then `callback` option must be set.
+This callback function will be called by another contract. Remote function will pass its return
+values as function arguments for the callback function. That's why types of return values of the
+callee function must be equal to function arguments of the callback function.  
+If function marked as `responsible` then field `_answer_id` appears in input parameters of the
+function in *abi.json file.
 
-Example:
+Example of external calling of function which returns nothing:
 
 ```TVMSolidity
 interface IContract {
@@ -1690,6 +1858,7 @@ interface IContract {
 
 contract Caller {
     function callExt(address addr) public {
+        IContract(addr).f(123); // attached default value: 0.01 ton
         IContract(addr).f{value: 10 ton}(123);
         IContract(addr).f{value: 10 ton, flag: 3}(123);
         IContract(addr).f{value: 10 ton, bounce: true}(123);
@@ -1699,6 +1868,115 @@ contract Caller {
         IContract(addr).f{value: 10 ton, currencies:cc}(123);
     }
 }
+```
+
+Example of external calling of function which returns some values:
+
+```TVMSolidity
+contract RemoteContract {
+    // Note this function is marked as responsible to call callback function
+    function getCost(uint x) public pure responsible returns (uint) {
+        uint cost = x == 0 ? 111 : 222;
+        // return cost and set option for outbound internal message.
+        return{value: 0, bounce: false, flag: 64} cost;  
+    }
+}
+
+contract Caller {
+    function test(address addr, uint x) public pure {
+        // `getCost` returns result to `onGetCost`
+        RemoteContract(addr).getCost{value: 1 ton, callback: Caller.onGetCost}(x);
+    }
+
+    function onGetCost(uint cost) public {
+        // check that msg.sender is expected address 
+        // we get cost value, we can handle this value
+    }
+}
+```
+
+*.abi.json for responsible function `getCost`:
+```json
+{
+    "name": "getCost",
+    "inputs": [
+        {"name":"_answer_id","type":"uint32"},
+        {"name":"x","type":"uint256"}
+    ],
+    "outputs": [
+        {"name":"value0","type":"uint256"}
+    ]
+}
+```
+
+See also:
+ * Example of usage callback: [4.1_CentralBank](https://github.com/tonlabs/samples/blob/master/solidity/4.1_CentralBank.sol)
+and [4.1_CurrencyExchange.sol](https://github.com/tonlabs/samples/blob/master/solidity/4.1_CurrencyExchange.sol)
+ * [return](#return)
+
+### Delete variables
+
+As in classic Solidity `delete` operation assigns the initial value for the type to a variable.
+Delete operation can be applied not only to variables itself, but to its fields or indexed values.
+
+Example:
+
+```TVMSolidity
+int a = 5;
+delete a;
+require(a == 0);
+
+uint[] arr;
+arr.push(11);
+arr.push(22);
+arr.push(33);
+
+delete arr[1];
+require(arr[0] == 11);
+require(arr[1] == 0);
+require(arr[2] == 33);
+delete arr;
+require(arr.length == 0);
+
+mapping(uint => uint) l_map;
+l_map[1] = 2;
+delete l_map[1];
+require(!l_map.exists(1));
+l_map[1] = 2;
+delete l_map;
+require(!l_map.exists(1));
+
+struct DataStruct {
+    uint m_uint;
+    bool m_bool;
+}
+
+DataStruct l_struct;
+l_struct.m_uint = 1;
+delete l_struct;
+require(l_struct.m_uint == 0);
+
+TvmBuilder b;
+uint i = 0x54321;
+b.store(i);
+TvmCell c = b.toCell();
+delete c;
+TvmCell empty;
+require(tvm.hash(empty) == tvm.hash(c));
+b.store(c);
+
+TvmSlice slice = b.toSlice();
+require(slice.bits() == 256);
+require(slice.refs() == 1);
+delete slice;
+require(slice.bits() == 0);
+require(slice.refs() == 0);
+
+require(b.bits() == 256);
+require(b.refs() == 1);
+delete b;
+require(b.bits() == 0);
+require(b.refs() == 0);
 ```
 
 ### API functions and members
@@ -1731,7 +2009,7 @@ msg.pubkey() returns (uint256);
 Returns sender's public key, obtained from the body if the external
 inbound message. If message is not signed function returns 0. If
 message is signed and message header ([pragma AbiHeader](#pragma-abiheader))
-does not contain pubkey than `msg.pubkey()` is equal to `tvm.pubkey()`.
+does not contain pubkey then `msg.pubkey()` is equal to `tvm.pubkey()`.
 
 ##### msg.createdAt
 
@@ -1785,11 +2063,31 @@ tvm.log(string log);
 logtvm(string log);
 ```
 
-Executes TVM instruction "PRINTSTR" ([TVM][1] - A.12.2. - FEFn01ssss).
-This command may be ignored if --without-logstr flag is set in the
-command line for the compiler.
+Dumps `log` string. This function is wrapper for TVM instructions
+`PRINTSTR` (for constant literal strings shorter than 16 symbols) and
+`STRDUMP` (for other strings). `logtvm` is an alias for `tvm.log(string)`. Example:
 
-**logtvm** is an alias for tvm.log(string).
+```TVMSolidity
+tvm.log("Hello,world!");
+logtvm("99_Bottles");
+
+string s = "Some_text";
+tvm.log(s);
+```
+
+Note: For long strings dumps only the first 127 symbols.
+
+##### tvm.hexdump() and tvm.bindump()
+
+```TVMSolidity
+TvmBuilder b;
+b.storeUnsigned(0x9876543210, 40);
+TvmCell c = b.toCell();
+tvm.hexdump(c);
+tvm.bindump(c);
+```
+
+Dumps cell data. Note that this function dump data only from the first cell.
 
 ##### tvm.setcode()
 
@@ -1797,7 +2095,6 @@ command line for the compiler.
 tvm.setcode(TvmCell newCode);
 ```
 
-Executes TVM instruction "SETCODE" ([TVM][1] - A.11.9. - FB04).
 This command creates an output action that would change this smart contract
 code to that given by Cell **newCode** (this change will take effect only
 after the successful termination of the current run of the smart contract).
@@ -1870,7 +2167,9 @@ tvm.hash(bytes data) returns (uint256);
 
 Executes TVM instruction "HASHCU" ([TVM][1] - A.11.6. - F900).
 It computes the representation hash of a given argument and returns
-it as a 256-bit unsigned integer
+it as a 256-bit unsigned integer. For `string` and `bytes` it computes
+hash of the tree of cells, which contains data, but not data itself.
+See [sha256](#sha256) to count hash of data.
 
 Example:
 
@@ -1924,7 +2223,7 @@ bool signatureIsValid = tvm.checkSign(hash, signature, pubkey);  // 3 variant
 tvm.insertPubkey(TvmCell stateInit, uint256 pubkey) returns (TvmCell);
 ```
 
-Inserts a public key into stateInit data field.
+Inserts a public key into stateInit data field. If `stateInit` has no `data` field then throws exception.
 
 ##### tvm.buildStateInit()
 
@@ -1946,11 +2245,16 @@ Member `splitDepth` of the tree of cell `StateInit`:
 List of possible names:
 
 * `code` (`TvmCell`) - defines the code field of the `StateInit`. Must be specified.
-* `data` (`TvmCell`) - defines the data field of the `StateInit`. Conflicts with `pubkey` and `varInit`. Can be omitted, in this case data field would be build from `pubkey` and `varInit`.
-* `splitDepth` (`uint8`) - splitting depth. `0 <= splitDepth <= 31`. Can be omitted. By default has no value.
-* `pubkey` (`uint256`) - defines the public key of the new contract. Conflicts with `data`. Can be omitted, default value is 0.
-* `varInit` (`initializer list`) - used to set [static](#keyword-static) variables of the contract which `StateInit` is built. Conflicts with `data` and requires `contr` to be set. Can be omitted.
-* `contr` (`contract`) - defines the contract which `StateInit` is built. Mandatory to be set if the option `varInit` is specified.
+* `data` (`TvmCell`) - defines the data field of the `StateInit`. Conflicts with `pubkey` and
+`varInit`. Can be omitted, in this case data field would be build from `pubkey` and `varInit`.
+* `splitDepth` (`uint8`) - splitting depth. `0 <= splitDepth <= 31`. Can be omitted. By default has
+no value.
+* `pubkey` (`uint256`) - defines the public key of the new contract. Conflicts with `data`.
+Can be omitted, default value is 0.
+* `varInit` (`initializer list`) - used to set [static](#keyword-static) variables of the contract
+which `StateInit` is built. Conflicts with `data` and requires `contr` to be set. Can be omitted.
+* `contr` (`contract`) - defines the contract which `StateInit` is built. Mandatory to be set if the
+option `varInit` is specified.
 
 Examples of usage of this function:
 
@@ -2082,7 +2386,7 @@ address newWallet = new SimpleWallet{
     value: 1 ton,
     code: code,
     pubkey: 0xe8b1d839abe27b2abb9d4a2943a9143a9c7e2ae06799bd24dec1d7a8891ae5dd,
-    splitDepth: 15
+    splitDepth: 15,
     varInit: {m_owner: address(this), m_value: 15}
 }(arg0, arg1, ...);
 ```
@@ -2091,11 +2395,16 @@ address newWallet = new SimpleWallet{
 
 This options can be used with `stateInit` and `code`:
 
-* `value` (`uint128`) - funds attached to the outbound internal message, that creates new account. This value must be set.
-* `currencies` (`ExtraCurrencyCollection`) - currencies attached to the outbound internal message. Defaults to an empty set.
-* `bounce` (`bool`) - if it's set and deploying falls (only at computing phase, not at action phase!) then funds will be returned. Otherwise (flag isn't set or deploying terminated successfully) the address accepts the funds. Defaults to `true`.
+* `value` (`uint128`) - funds attached to the outbound internal message, that creates new account.
+This value must be set.
+* `currencies` (`ExtraCurrencyCollection`) - currencies attached to the outbound internal message.
+Defaults to an empty set.
+* `bounce` (`bool`) - if it's set and deploying falls (only at computing phase, not at action
+phase!) then funds will be returned. Otherwise (flag isn't set or deploying terminated successfully)
+the address accepts the funds. Defaults to `true`.
 * `wid` (`uint8`) - workchain id of the new account address. Defaults to `0`.
-* `flag` (`uint16`) - flag used to send the outbound internal message. Defaults to `1`. See opcode `SENDRAWMSG` ([TVM][1] - A.11.10).
+* `flag` (`uint16`) - flag used to send the outbound internal message. Defaults to `1`. See opcode
+`SENDRAWMSG` ([TVM][1] - A.11.10).
 
 ```TVMSolidity
 TvmCell stateInit = ...;
@@ -2119,7 +2428,7 @@ Let's consider how to protect against this problem:
 1. Constructor is called by external message.  
 We must check that we didn't forget to set public key in the contract and the
 inbound message is signed by that key. If hacker doesn't have your private
-key than he can't sign message to call the constructor.  
+key then he can't sign message to call the constructor.  
 See [constructor of WalletProducer](https://github.com/tonlabs/samples/blob/master/solidity/17_ContractProducer.sol).
 2. Constructor is called by internal message.  
 We should define static variable in the new contract that will contain
@@ -2128,7 +2437,7 @@ And in the constructor we must check address of the message sender.
 See [function `deployWallet` how to deploy contract](https://github.com/tonlabs/samples/blob/master/solidity/17_ContractProducer.sol).  
 See [constructor of SimpleWallet](https://github.com/tonlabs/samples/blob/master/solidity/17_SimpleWallet.sol).  
 If some contract should deploy plenty of contracts (with some contract's
-public key) than it's a good idea to declare static variable in the deployed
+public key) then it's a good idea to declare static variable in the deployed
 contract. This variable can contain some sequence number. It will allow
 each new contact to have unique `stateInit`.
 See [SimpleWallet](https://github.com/tonlabs/samples/blob/master/solidity/17_SimpleWallet.sol).  
@@ -2150,7 +2459,9 @@ Returns contract's public key, stored in contract data. If key is not set functi
 tvm.setCurrentCode(TvmCell newCode);
 ```
 
-Changes this smart contract current code to that given by Cell **newCode**.
+Changes this smart contract current code to that given by Cell **newCode**. Unlike [tvm.setcode()](#tvmsetcode)
+this function changes code of the smart contract only for current TVM execution, but has no effect
+after termination of the current run of the smart contract.
 
 See example of how to use this function:
 
@@ -2175,7 +2486,7 @@ tvm.functionId(functionName) returns (uint32);
 tvm.functionId(ContractName) returns (uint32);
 ```
 
-This function returns a function id (uint32) for public/external function
+Returns a function id (uint32) for public/external function
 or constructor.  
 
 Example:
@@ -2210,26 +2521,36 @@ See example of how to use this function:
 ##### tvm.encodeBody()
 
 ```TVMSolidity
-tvm.encodeBody(function_name, arg0, arg1, arg2, ...) returns (TvmCell);
+tvm.encodeBody(function, arg0, arg1, arg2, ...) returns (TvmCell);
+tvm.encodeBody(function, callbackFunction, arg0, arg1, arg2, ...) returns (TvmCell);
 ```
 
-Constructs a function call message body that can be used
-as the payload for [\<address\>.transfer()](#addresstransfer).  
+Constructs a function call message body that can be used as the payload for [\<address\>.transfer()](#addresstransfer). If `function` returns some value then `callbackFunction` parameter must be set.
 
 Example:
 
 ```TVMSolidity
 interface Remote {
     function func(uint256 num, address a, int64 num2) public pure;
+    function getCost(uint256 num) public pure returns (uint128);
 }
 
 contract Caller {
     function test() public pure {
         TvmCell body = tvm.encodeBody(Remote.func, 123, address.makeAddrStd(22, 333), -654);
-        msg.sender.transfer({value:1e10, body:body});
+        msg.sender.transfer({value: 10 ton, body: body});
+        
+        body = tvm.encodeBody(Remote.getCost, onGetCost, 105); 
+        msg.sender.transfer({value: 10 ton, body: body});
+    }
+    
+    function onGetCost(uint128 cost) public {
+        /* */
     }
 }
 ```
+
+See also: [External function calls](#external-function-calls) and [\<TvmSlice\>.decodeFunctionParams()](#tvmslicedecodefunctionparams)
 
 ##### tvm.exit() and tvm.exit1()
 
@@ -2261,27 +2582,136 @@ function g1(uint a) private {
 }
 ```
 
-#### **math** namespace
-
-##### math.min() and math.max()
+##### tvm.buildExtMsg()
 
 ```TVMSolidity
-math.min(int a, int b, ...) returns (int);
-math.max(int a, int b, ...) returns (int);
-math.min(uint a, uint b, ...) returns (uint);
-math.max(uint a, uint b, ...) returns (uint);
+tvm.buildExtMsg({
+    dest: address,
+    time: uint64,
+    expire: uint32,
+    call: {functionIdentifier [, list of function arguments]},
+    sign: bool,
+    pubkey: optional(uint256),
+    abiVer: uint8,
+    callbackId: uint32.
+    onErrorId: uint32,
+    stateInit: TvmCell
+})
+returns (TvmCell);
 ```
 
-Returns the minimal (maximal) value of the passed arguments.
+Allows to create an external inbound message, that calls the **func** function of the
+contract on address **destination** with specified function arguments.
+Mandatory parameters that are used to form a src address field that is used for debots:
+
+* `abiVer` - ABI version.
+* `callbackId` - identifier of the callback function.
+* `onErrorId` - identifier of the function that is called in case of error.
+
+This parameters are stored in addr_extern and placed to the src field of the message.
+Message is of type [ext_in_msg_info](https://github.com/ton-blockchain/ton/blob/24dc184a2ea67f9c47042b4104bbb4d82289fac1/crypto/block/block.tlb#L127)  
+and src addr is of type [addr_extern](https://github.com/ton-blockchain/ton/blob/24dc184a2ea67f9c47042b4104bbb4d82289fac1/crypto/block/block.tlb#L101)  
+but stores special data:
+
+* callback id - 32 bits;
+* on error id - 32 bits;
+* abi version - 8 bits;
+* header mask - 3 bits in such order: time, expire, pubkey.
+
+Other function parameters define fields of the message:
+
+* `time` - message creation timestamp. Used for replay attack protection, encoded as 64 bit Unix
+time in milliseconds.
+* `expire` - Unix time (in seconds, 32 bit) after that message should not be processed by contract.
+* `pubkey` - public key from key pair used for signing the message body. This parameter is optional
+and can be omitted.
+* `sign` - constant bool flag that shows whether message should contain signature. If set to
+**true** message is generated with signature field filled with zeroes. This parameter is optional
+and can be omitted (in this case is equal to **false**).
+
+Also user can attach stateInit to the message using `stateInit` parameter.
+
+Function throws an exception with code 64 if function is called with wrong parameters (pubkey is set
+and has value, but sign is false or omitted).
+
+Example:
+
+```TVMSolidity
+
+interface Foo {
+    function bar(uint a, uint b) external pure;
+}
+
+contract Test {
+
+    TvmCell public m_cell;
+
+    function generate0() public {
+        tvm.accept();
+        address addr = address.makeAddrStd(0, 0x0123456789012345678901234567890123456789012345678901234567890123);
+        m_cell = tvm.buildExtMsg({abiVer: 1, callbackId: 0, onErrorId: 0, dest: addr, time: 0x123, expire: 0x12345, call: {Foo.bar, 111, 88}});
+    }
+
+    function generate1() public {
+        tvm.accept();
+        optional(uint) pubkey;
+        address addr = address.makeAddrStd(0, 0x0123456789012345678901234567890123456789012345678901234567890123);
+        m_cell = tvm.buildExtMsg({abiVer: 1, callbackId: 0, onErrorId: 0, dest: addr, time: 0x123, expire: 0x12345, call: {Foo.bar, 111, 88}, pubkey: pubkey});
+    }
+
+    function generate2() public {
+        tvm.accept();
+        optional(uint) pubkey;
+        pubkey.set(0x95c06aa743d1f9000dd64b75498f106af4b7e7444234d7de67ea26988f6181df);
+        address addr = address.makeAddrStd(0, 0x0123456789012345678901234567890123456789012345678901234567890123);
+        m_cell = tvm.buildExtMsg({abiVer: 1, callbackId: 0, onErrorId: 0, dest: addr, time: 0x1771c58ef9a, expire: 0x600741e4, call: {Foo.bar, 111, 88}, pubkey: pubkey, sign: true});
+    }
+
+}
+```
+
+Also external inbound message can be built and sent with construction similar to remote contract
+call. It requires call option "extMsg" to be specified with constant true value and other options
+similar to `buildExtMsg` function call.
+
+```TVMSolidity
+interface Foo {
+    function bar(uint a, uint b) external pure;
+}
+
+contract Test {
+
+    function test7() public {
+        address addr = address.makeAddrStd(0, 0x0123456789012345678901234567890123456789012345678901234567890123);
+        Foo(addr).bar{extMsg: true, expire: 0x12345, time: 0x123}(123, 45);
+        optional(uint) pubkey;
+        Foo(addr).bar{extMsg: true, expire: 0x12345, time: 0x123, pubkey: pubkey}(123, 45);
+        Foo(addr).bar{extMsg: true, expire: 0x12345, time: 0x123, pubkey: pubkey, sign: true}(123, 45);
+        pubkey.set(0x95c06aa743d1f9000dd64b75498f106af4b7e7444234d7de67ea26988f6181df);
+        Foo(addr).bar{extMsg: true, expire: 0x12345, time: 0x123, pubkey: pubkey, sign: true}(123, 45);
+        Foo(addr).bar{extMsg: true, expire: 0x12345, time: 0x123, sign: true}(123, 45);
+    }
+}
+```
+
+#### **math** namespace
+
+##### math.min() math.max()
+
+```TVMSolidity
+math.min(T a, T b, ...) returns (T);
+math.max(T a, T b, ...) returns (T);
+```
+
+Returns the minimal (maximal) value of the passed arguments. `T` should be an integer or fixed point type
 
 ##### math.minmax()
 
 ```TVMSolidity
-math.minmax(uint, uint) returns (uint /*min*/, uint /*max*/);
-math.minmax(int, int) returns (int /*min*/, int /*max*/);
+math.minmax(T a, T b) returns (T /*min*/, T /*max*/);
 ```
 
-Returns min and max values of the passed arguments.
+Returns minimal and maximal values of the passed arguments. `T` should be an integer or fixed point type
 
 Example:
 
@@ -2292,7 +2722,8 @@ Example:
 ##### math.abs()
 
 ```TVMSolidity
-math.abs(int val) returns (int);
+math.abs(intM val) returns (intM);
+math.abs(fixedMxN val) returns (fixedMxN);
 ```
 
 Computes the absolute value of the given integer.
@@ -2325,11 +2756,11 @@ uint b = math.modpow2(val, pow);
 ##### math.divr() math.divc()
 
 ```TVMSolidity
-math.divc(int a, int b) returns (int);
-math.divr(int a, int b) returns (int);
+math.divc(T a, T b) returns (T);
+math.divr(T a, T b) returns (T);
 ```
 
-Returns result of the division of two integers.
+Returns result of the division of two integers. `T` should be an integer or fixed point type  
 The return value is rounded.  
 Round mode "nearest integer" is used for `divr`.  
 Round mode "ceiling" is used for `divc`.
@@ -2339,17 +2770,21 @@ Example:
 ```TVMSolidity
 int c = math.divc(10, 3); // 4
 int c = math.divr(10, 3); // 3
+
+fixed32x2 a = 0.25;
+fixed32x2 res = math.divc(a, 2);
+require(res == 0.13);
 ```
 
 ##### math.muldiv() math.muldivr() math.muldivc()
 
 ```TVMSolidity
-math.muldiv(int a, int b, int c) returns (int);
-math.muldivr(int a, int b, int c) returns (int);
-math.muldivc(int a, int b, int c) returns (int);
+math.muldiv(T a, T b, T c) returns (T);
+math.muldivr(T a, T b, T c) returns (T);
+math.muldivc(T a, T b, T c) returns (T);
 ```
 
-Multiplies two values and then divides the result by a third value.
+Multiplies two values and then divides the result by a third value. `T` is integer type.  
 The return value is rounded.  
 Round mode "floor" is used for `muldiv`.  
 Round mode "nearest integer" is used for `muldivr`.  
@@ -2367,14 +2802,12 @@ require(math.muldivc(3, 7, 2) == 11);
 ##### math.muldivmod()
 
 ```TVMSolidity
-math.muldivmod(uint a, uint b, uint c) returns (uint /*result*/, uint /*remainder*/);
+math.muldivmod(T a, T b, T c) returns (T /*result*/, T /*remainder*/);
 ```
 
-Executes TVM instruction "MULDIVMOD" ([TVM][1] - A.5.2. - A98C).
-This instruction multiplies first two arguments, divides the result
-by third argument and returns the result and the remainder.
-Intermediate result is stored in the 514 bit buffer, and the final result
-is rounded to the floor.
+This instruction multiplies first two arguments, divides the result by third argument and returns
+the result and the remainder. Intermediate result is stored in the 514 bit buffer, and the final
+result is rounded to the floor.
 
 Example:
 
@@ -2382,11 +2815,51 @@ Example:
 uint a = 3;
 uint b = 2;
 uint c = 5;
-(uint d, uint r) = math.muldivmod(a, b, c);
+(uint d, uint r) = math.muldivmod(a, b, c); // (1, 1)
 int e = -1;
 int f = 3;
 int g = 2;
-(int h, int p) = math.muldivmod(e, f, g);
+(int h, int p) = math.muldivmod(e, f, g); // (-2, 1)
+```
+
+##### math.divmod()
+
+```TVMSolidity
+math.divmod(T a, T b) returns (T /*result*/, T /*remainder*/);
+```
+
+This instruction divides the first number by the second one and returns the result and the  
+remainder. Result is rounded to the floor.  `T` is integer type.
+
+Example:
+
+```TVMSolidity
+uint a = 3;
+uint b = 2;
+(uint d, uint r) = math.divmod(a, b);
+int e = -1;
+int f = 3;
+(int h, int p) = math.divmod(e, f);
+```
+
+##### math.sign()
+
+```TVMSolidity
+math.sign(int val) returns (int8);
+```
+
+Returns number in case of sign of the argument value `val`:
+
+* -1 if `val` is negative;
+* 0 if `val` is zero;
+* 1 if `val` is positive.
+
+Example:
+
+```TVMSolidity
+require(math.sign(-1333) == -1);
+require(math.sign(44) == 1);
+require(math.sign(0) == 0);
 ```
 
 ##### **tx** namespace
@@ -2422,15 +2895,15 @@ parameters) each time before using the pseudorandom number generator.
 ##### rnd.next
 
 ```TVMSolidity
-rnd.next([Type mod]) returns (Type);
+rnd.next([Type limit]) returns (Type);
 ```
 
 Generates a new pseudo-random number.  
 
 1) Returns `uint256` number.
-2) If the first argument `mod > 0` then function returns the value in the
-range `0..mod-1`. Else if `mod < 0` then the returned value lies in range
-`mod..-1`. Else if `mod == 0` than it returns `0`.
+2) If the first argument `limit > 0` then function returns the value in the
+range `0..limit-1`. Else if `limit < 0` then the returned value lies in range
+`limit..-1`. Else if `limit == 0` than it returns `0`.
 
 Example:
 
@@ -2496,6 +2969,61 @@ of the current smart contract and destroys the current account.
 See example of how to use **selfdestruct** function:
 
 * [Kamikaze](https://github.com/tonlabs/samples/blob/master/solidity/8_Kamikaze.sol)
+
+#### sha256
+
+```TVMSolidity
+sha256(TvmSlice slice) returns (uint256)
+```
+
+Compute the SHA-256 hash of the `slice`. If the bit length of s is not divisible by eight, throws a cell underflow
+exception.  
+**Note**: slice's references are not used to compute the hash. Only data bits located in the root cell of `slice` are used.
+
+Also see [tvm.hash()](#tvmhash) to count representation hash of tree of cells.
+
+#### gasToValue
+
+```TVMSolidity
+gasToValue(uint128 gas, int8 wid) returns (uint128 value)
+```
+
+Returns worth of `gas` in workchain `wid`.
+Throws an exception if `wid` doesn't equal `0` and `-1`.
+
+#### valueToGas
+
+```TVMSolidity
+valueToGas(uint128 value, int8 wid) returns (uint128 gas)
+```
+
+Returns how much `gas` could be bought on `value` nanotons in workchain `wid`.
+Throws an exception if `wid` doesn't equal `0` and `-1`.
+
+### Solidity runtime errors
+
+Smart-contract written on solidity can throw runtime errors while execution.
+
+Solidity runtime error codes:
+* 40 - External inbound message has an invalid signature. See [tvm.pubkey()](#tvmpubkey) and [msg.pubkey()](#msgpubkey).
+* 50 - Array index or index of [\<mapping\>.at()](#mappingat) is out of range.
+* 51 - Calling of contract's constructor that has already been called.
+* 52 - Replay protection exception. See `timestamp` in [pragma AbiHeader](#pragma-abiheader).
+* 53 - See [\<address\>.unpack()](#addressunpack).
+* 54 - Calling `<array>.pop` for empty array.
+* 55 - See [tvm.insertPubkey()](#tvminsertpubkey).
+* 57 - External inbound message is expired. See `expire` in [pragma AbiHeader](#pragma-abiheader).
+* 58 - External inbound message has no signature but has public key. See `pubkey` in [pragma AbiHeader](#pragma-abiheader).
+* 60 - Inbound message has wrong function id. In contract there are no functions with such function id and also there is no fallback function which could handle the message. See [fallback](#fallback).
+* 61 - Deploying `StateInit` has no public key in `data` field.
+* 62 - Reserved for internal usage.
+* 63 - See [\<optional(Type)\>.get()](#optionaltypeget).
+* 64 - `tvm.buildExtMSg()` call with wrong parameters. See [tvm.buildExtMsg()](#tvmbuildextmsg).
+* 65 - Calling of unassigned variable of function type. See [Function type](#function-type).
+* 66 - Converting an integer to a string with width less than number length. See [format()](#format).
+* 67 - See [gasToValue](#gastovalue) and [valueToGas](#valuetogas).
+* 68 - There is no config parameter 20 or 21.
+* 69 - Calculating zero to the power of zero (`0**0` in solidity style or `0^0`).
 
 [1]: https://ton.org/tvm.pdf        "TVM"
 [2]: https://ton.org/tblkch.pdf     "TBLKCH"

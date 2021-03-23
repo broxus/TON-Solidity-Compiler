@@ -149,11 +149,13 @@ util::Result<TypePointers> transformParametersToExternal(TypePointers const& _pa
 }
 
 BoolResult Type::isImplicitlyConvertibleTo(Type const& _other) const {
-	auto opt = dynamic_cast<OptionalType const*>(&_other);
-	if (opt != nullptr && this->isImplicitlyConvertibleTo(*opt->valueType())) {
+	if (*this == _other) {
 		return true;
 	}
-	return *this == _other;
+	if (auto optOther = dynamic_cast<OptionalType const*>(&_other))
+		if (isImplicitlyConvertibleTo(*optOther->valueType()))
+			return true;
+	return false;
 }
 
 void Type::clearCache() const
@@ -335,8 +337,6 @@ TypePointer Type::fullEncodingType(bool _inLibraryCall, bool _encoderV2, bool) c
 	// Structs are fine in the following circumstances:
 	// - ABIv2 or,
 	// - storage struct for a library
-	if (_inLibraryCall && encodingType->dataStoredIn(DataLocation::Storage))
-		return encodingType;
 	TypePointer baseType = encodingType;
 	while (auto const* arrayType = dynamic_cast<ArrayType const*>(baseType))
 		baseType = arrayType->baseType();
@@ -349,14 +349,13 @@ TypePointer Type::fullEncodingType(bool _inLibraryCall, bool _encoderV2, bool) c
 MemberList::MemberMap Type::boundFunctions(Type const& _type, ContractDefinition const& _scope)
 {
 	// Normalise data location of type.
-	TypePointer type = TypeProvider::withLocationIfReference(DataLocation::Storage, &_type);
+	TypePointer type = TypeProvider::withLocationIfReference(&_type);
 	set<Declaration const*> seenFunctions;
 	MemberList::MemberMap members;
 	for (ContractDefinition const* contract: _scope.annotation().linearizedBaseContracts)
 		for (UsingForDirective const* ufd: contract->usingForDirectives())
 		{
 			if (ufd->typeName() && *type != *TypeProvider::withLocationIfReference(
-				DataLocation::Storage,
 				ufd->typeName()->annotation().type
 			))
 				continue;
@@ -442,7 +441,7 @@ MemberList::MemberMap AddressType::nativeMembers(ContractDefinition const*) cons
 {
 	MemberList::MemberMap members = {
 		{"balance", TypeProvider::uint(128)},
-		{"currencies", TypeProvider::extraCurrencyCollection(DataLocation::Memory)},
+		{"currencies", TypeProvider::extraCurrencyCollection()},
 		{"wid", TypeProvider::integer(8, IntegerType::Modifier::Signed)},
 		{"value", TypeProvider::uint256()},
 		{"call", TypeProvider::function(strings{"bytes memory"}, strings{"bool", "bytes memory"}, FunctionType::Kind::BareCall, false, StateMutability::NonPayable)},
@@ -483,7 +482,7 @@ MemberList::MemberMap AddressType::nativeMembers(ContractDefinition const*) cons
 							 TypeProvider::boolean(),
 							 TypeProvider::uint(16),
 							 TypeProvider::tvmcell(),
-							 TypeProvider::extraCurrencyCollection(DataLocation::Memory)},
+							 TypeProvider::extraCurrencyCollection()},
 			TypePointers{},
 			strings{string("value"), string("bounce"), string("flag"), string("body"), string("currencies")},
 			strings{},
@@ -515,10 +514,14 @@ bool isValidShiftAndAmountType(Token _operator, Type const& _shiftAmountType)
 IntegerType::IntegerType(unsigned _bits, IntegerType::Modifier _modifier):
 	m_bits(_bits), m_modifier(_modifier)
 {
-	solAssert(
-		m_bits > 0 && m_bits <= 256 && m_bits % 8 == 0,
-		"Invalid bit number for integer type: " + util::toString(m_bits)
-	);
+	if (_bits == 257 && _modifier == IntegerType::Modifier::Signed) {
+
+	} else {
+		solAssert(
+				m_bits > 0 && m_bits <= 256 && m_bits % 8 == 0,
+				"Invalid bit number for integer type: " + util::toString(m_bits)
+		);
+	}
 }
 
 string IntegerType::richIdentifier() const
@@ -1246,6 +1249,22 @@ u256 RationalNumberType::literalValue(Literal const*) const
 	return value;
 }
 
+bigint RationalNumberType::value() const {
+	if (!isFractional())
+		return m_value.numerator();
+
+	bigint shiftedValue;
+	auto fixed = fixedPointType();
+	solAssert(fixed, "Rational number cannot be represented as fixed point type.");
+	int fractionalDigits = fixed->fractionalDigits();
+	shiftedValue = m_value.numerator() * boost::multiprecision::pow(bigint(10), fractionalDigits) / m_value.denominator();
+
+	// we ignore the literal and hope that the type was correctly determined
+	solAssert(shiftedValue <= u256(-1), "Number constant too large.");
+	solAssert(shiftedValue >= -(bigint(1) << 255), "Number constant too small.");
+	return shiftedValue;
+}
+
 TypePointer RationalNumberType::mobileType() const
 {
 	if (!isFractional())
@@ -1531,71 +1550,33 @@ TypeResult ContractType::unaryOperatorResult(Token _operator) const
 		return nullptr;
 }
 
-Type const* ReferenceType::withLocation(DataLocation _location, bool _isPointer) const
+Type const* ReferenceType::withLocation(bool _isPointer) const
 {
-	return TypeProvider::withLocation(this, _location, _isPointer);
+	return TypeProvider::withLocation(this, _isPointer);
 }
 
 TypeResult ReferenceType::unaryOperatorResult(Token _operator) const
 {
 	if (_operator != Token::Delete)
 		return nullptr;
-	// delete can be used on everything except calldata references or storage pointers
-	// (storage references are ok)
-	switch (location())
-	{
-	case DataLocation::CallData:
-		return nullptr;
-	case DataLocation::Memory:
-		return TypeProvider::emptyTuple();
-	case DataLocation::Storage:
-		return m_isPointer ? nullptr : TypeProvider::emptyTuple();
-	}
-	return nullptr;
+	return TypeProvider::emptyTuple();
 }
 
 TypePointer ReferenceType::copyForLocationIfReference(Type const* _type) const
 {
-	return TypeProvider::withLocationIfReference(m_location, _type);
-}
-
-string ReferenceType::stringForReferencePart() const
-{
-	switch (m_location)
-	{
-	case DataLocation::Storage:
-		return string("storage ") + (m_isPointer ? "pointer" : "ref");
-	case DataLocation::CallData:
-		return "calldata";
-	case DataLocation::Memory:
-		return "memory";
-	}
-	solAssert(false, "");
-	return "";
+	return TypeProvider::withLocationIfReference(_type);
 }
 
 string ReferenceType::identifierLocationSuffix() const
 {
 	string id;
-	switch (location())
-	{
-	case DataLocation::Storage:
-		id += "_storage";
-		break;
-	case DataLocation::Memory:
-		id += "_memory";
-		break;
-	case DataLocation::CallData:
-		id += "_calldata";
-		break;
-	}
 	if (isPointer())
 		id += "_ptr";
 	return id;
 }
 
-ArrayType::ArrayType(DataLocation _location, bool _isString):
-	ReferenceType(_location),
+ArrayType::ArrayType(bool _isString):
+	ReferenceType(),
 	m_arrayKind(_isString ? ArrayKind::String : ArrayKind::Bytes),
 	m_baseType{TypeProvider::byte()}
 {
@@ -1644,8 +1625,6 @@ BoolResult ArrayType::isExplicitlyConvertibleTo(Type const& _convertTo) const
 	if (_convertTo.category() != category())
 		return false;
 	auto& convertTo = dynamic_cast<ArrayType const&>(_convertTo);
-	if (convertTo.location() != location())
-		return false;
 	if (!isByteArray() || !convertTo.isByteArray())
 		return false;
 	return true;
@@ -1754,13 +1733,7 @@ u256 ArrayType::storageSize() const
 
 unsigned ArrayType::sizeOnStack() const
 {
-	if (m_location == DataLocation::CallData)
-		// offset [length] (stack top)
-		return 1 + (isDynamicallySized() ? 1 : 0);
-	else
-		// storage slot or memory offset
-		// byte offset inside storage value is omitted
-		return 1;
+	return 1;
 }
 
 string ArrayType::toString(bool _short) const
@@ -1777,8 +1750,6 @@ string ArrayType::toString(bool _short) const
 			ret += length().str();
 		ret += "]";
 	}
-//	if (!_short)
-//		ret += " " + stringForReferencePart();
 	return ret;
 }
 
@@ -1875,18 +1846,36 @@ MemberList::MemberMap ArrayType::nativeMembers(ContractDefinition const*) const
 		));
 	} else {
 		members.emplace_back("substr", TypeProvider::function(
-			TypePointers{TypeProvider::uint(8), TypeProvider::uint(8)},
+			TypePointers{TypeProvider::uint256()},
 			TypePointers{TypeProvider::stringMemory()},
-			strings{string("from"), string("count")},
+			strings{string("from")},
 			strings{string("substr")},
-			FunctionType::Kind::StringMethod,
-			false, StateMutability::Pure
+			FunctionType::Kind::StringSubstr,
+			false,
+			StateMutability::Pure
+		));
+		members.emplace_back("substr", TypeProvider::function(
+				TypePointers{TypeProvider::uint256(), TypeProvider::uint256()},
+				TypePointers{TypeProvider::stringMemory()},
+				strings{string("from"), "to"},
+				strings{string("substr")},
+				FunctionType::Kind::StringSubstr,
+				false,
+				StateMutability::Pure
 		));
 		members.emplace_back("byteLength", TypeProvider::function(
 			TypePointers{},
 			TypePointers{TypeProvider::uint(8)},
 			strings{},
 			strings{string("byteLength")},
+			FunctionType::Kind::StringMethod,
+			false, StateMutability::Pure
+		));
+		members.emplace_back("append", TypeProvider::function(
+			TypePointers{TypeProvider::stringMemory()},
+			TypePointers{},
+			strings{string("tail")},
+			strings{},
 			FunctionType::Kind::StringMethod,
 			false, StateMutability::Pure
 		));
@@ -1990,18 +1979,12 @@ MemberList::MemberMap MappingType::nativeMembers(ContractDefinition const*) cons
 
 TypePointer ArrayType::encodingType() const
 {
-	if (location() == DataLocation::Storage)
-		return TypeProvider::uint256();
-	else
-		return TypeProvider::withLocation(this, DataLocation::Memory, true);
+	return TypeProvider::withLocation(this, true);
 }
 
 TypePointer ArrayType::decodingType() const
 {
-	if (location() == DataLocation::Storage)
-		return TypeProvider::uint256();
-	else
-		return this;
+	return this;
 }
 
 TypeResult ArrayType::interfaceType(bool _inLibrary) const
@@ -2020,14 +2003,12 @@ TypeResult ArrayType::interfaceType(bool _inLibrary) const
 		solAssert(!baseInterfaceType.message().empty(), "Expected detailed error message!");
 		result = baseInterfaceType;
 	}
-	else if (_inLibrary && location() == DataLocation::Storage)
-		result = this;
 	else if (m_arrayKind != ArrayKind::Ordinary)
-		result = TypeProvider::withLocation(this, DataLocation::Memory, true);
+		result = TypeProvider::withLocation(this, true);
 	else if (isDynamicallySized())
-		result = TypeProvider::array(DataLocation::Memory, baseInterfaceType);
+		result = TypeProvider::array(baseInterfaceType);
 	else
-		result = TypeProvider::array(DataLocation::Memory, baseInterfaceType, m_length);
+		result = TypeProvider::array(baseInterfaceType, m_length);
 
 	if (_inLibrary)
 		m_interfaceType_library = result;
@@ -2040,16 +2021,15 @@ TypeResult ArrayType::interfaceType(bool _inLibrary) const
 u256 ArrayType::memoryDataSize() const
 {
 	solAssert(!isDynamicallySized(), "");
-	solAssert(m_location == DataLocation::Memory, "");
 	solAssert(!isByteArray(), "");
 	bigint size = bigint(m_length) * m_baseType->memoryHeadSize();
 	solAssert(size <= numeric_limits<u256>::max(), "Array size does not fit u256.");
 	return u256(size);
 }
 
-std::unique_ptr<ReferenceType> ArrayType::copyForLocation(DataLocation _location, bool _isPointer) const
+std::unique_ptr<ReferenceType> ArrayType::copyForLocation(bool _isPointer) const
 {
-	auto copy = make_unique<ArrayType>(_location);
+	auto copy = make_unique<ArrayType>();
 	copy->m_isPointer = _isPointer;
 	copy->m_arrayKind = m_arrayKind;
 	copy->m_baseType = copy->copyForLocationIfReference(m_baseType);
@@ -2064,7 +2044,7 @@ BoolResult ArraySliceType::isImplicitlyConvertibleTo(Type const& _other) const
 		return true;
 	}
 
-	if (m_arrayType.location() == DataLocation::CallData && m_arrayType.isDynamicallySized() && m_arrayType == _other)
+	if (m_arrayType.isDynamicallySized() && m_arrayType == _other)
 		return true;
 	return (*this) == _other;
 }
@@ -2194,10 +2174,7 @@ void StructType::clearCache() const
 
 Type const* StructType::encodingType() const
 {
-	if (location() != DataLocation::Storage)
-		return this;
-
-	return TypeProvider::uint256();
+	return this;
 }
 
 BoolResult StructType::isImplicitlyConvertibleTo(Type const& _convertTo) const
@@ -2297,11 +2274,9 @@ u256 StructType::storageSize() const
 	return max<u256>(1, members(nullptr).storageSize());
 }
 
-string StructType::toString(bool _short) const
+string StructType::toString(bool ) const
 {
-	string ret = "struct " + m_struct.annotation().canonicalName;
-	if (!_short)
-		ret += " " + stringForReferencePart();
+	string ret = "struct " + m_struct.annotation().canonicalName;;
 	return ret;
 }
 
@@ -2374,13 +2349,8 @@ TypeResult StructType::interfaceType(bool _inLibrary) const
 				)
 				{
 					m_recursive = true;
-					if (_inLibrary && location() == DataLocation::Storage)
-						continue;
-					else
-					{
-						result = TypeResult::err("Recursive structs can only be passed as storage pointers to libraries, not as memory objects to contract functions.");
-						return;
-					}
+					result = TypeResult::err("Recursive structs can only be passed as storage pointers to libraries, not as memory objects to contract functions.");
+					return;
 				}
 
 			auto iType = memberType->interfaceType(_inLibrary);
@@ -2401,10 +2371,8 @@ TypeResult StructType::interfaceType(bool _inLibrary) const
 	{
 		if (!result.message().empty())
 			m_interfaceType_library = result;
-		else if (location() == DataLocation::Storage)
-			m_interfaceType_library = this;
 		else
-			m_interfaceType_library = TypeProvider::withLocation(this, DataLocation::Memory, true);
+			m_interfaceType_library = TypeProvider::withLocation(this, true);
 
 		if (m_recursive.value())
 			m_interfaceType = TypeResult::err(recursiveErrMsg);
@@ -2417,14 +2385,14 @@ TypeResult StructType::interfaceType(bool _inLibrary) const
 	else if (!result.message().empty())
 		m_interfaceType = result;
 	else
-		m_interfaceType = TypeProvider::withLocation(this, DataLocation::Memory, true);
+		m_interfaceType = TypeProvider::withLocation(this, true);
 
 	return *m_interfaceType;
 }
 
-std::unique_ptr<ReferenceType> StructType::copyForLocation(DataLocation _location, bool _isPointer) const
+std::unique_ptr<ReferenceType> StructType::copyForLocation(bool _isPointer) const
 {
-	auto copy = make_unique<StructType>(m_struct, _location);
+	auto copy = make_unique<StructType>(m_struct);
 	copy->m_isPointer = _isPointer;
 	return copy;
 }
@@ -2461,11 +2429,11 @@ FunctionTypePointer StructType::constructorType() const
 		if (!member.type->canLiveOutsideStorage() || member.type->category() == Category::Mapping)
 			continue;
 		paramNames.push_back(member.name);
-		paramTypes.push_back(TypeProvider::withLocationIfReference(DataLocation::Memory, member.type));
+		paramTypes.push_back(TypeProvider::withLocationIfReference(member.type));
 	}
 	return TypeProvider::function(
 		paramTypes,
-		TypePointers{TypeProvider::withLocation(this, DataLocation::Memory, false)},
+		TypePointers{TypeProvider::withLocation(this, false)},
 		paramNames,
 		strings(1, ""),
 		FunctionType::Kind::Internal
@@ -2604,10 +2572,17 @@ string TupleType::richIdentifier() const
 
 bool TupleType::operator==(Type const& _other) const
 {
-	if (auto tupleType = dynamic_cast<TupleType const*>(&_other))
-		return components() == tupleType->components();
-	else
-		return false;
+	if (auto tupleOther = dynamic_cast<TupleType const*>(&_other)) {
+		if (components().size() == tupleOther->components().size()) {
+			bool ok = true;
+			for (size_t i = 0; i < components().size(); ++i) {
+				if (tupleOther->components().at(i) != nullptr)
+					ok &= *components().at(i) == *tupleOther->components().at(i);
+			}
+			return ok;
+		}
+	}
+	return false;
 }
 
 string TupleType::toString(bool _short) const
@@ -2742,7 +2717,6 @@ FunctionType::FunctionType(VariableDeclaration const& _varDecl):
 					if (!arrayType->isByteArray())
 						continue;
 				m_returnParameterTypes.push_back(TypeProvider::withLocationIfReference(
-					DataLocation::Memory,
 					member.type
 				));
 				m_returnParameterNames.push_back(member.name);
@@ -2752,7 +2726,6 @@ FunctionType::FunctionType(VariableDeclaration const& _varDecl):
 	else
 	{
 		m_returnParameterTypes.push_back(TypeProvider::withLocationIfReference(
-			DataLocation::Memory,
 			returnType
 		));
 		m_returnParameterNames.emplace_back("");
@@ -2875,7 +2848,7 @@ TypePointers FunctionType::returnParameterTypesWithoutDynamicTypes() const
 		m_kind == Kind::BareStaticCall
 	)
 		for (auto& param: returnParameterTypes)
-			if (param->isDynamicallySized() && !param->dataStoredIn(DataLocation::Storage))
+			if (param->isDynamicallySized())
 				param = TypeProvider::inaccessibleDynamic();
 
 	return returnParameterTypes;
@@ -2899,22 +2872,26 @@ string FunctionType::richIdentifier() const
 	case Kind::OptionalSet: id += "optionalmethod"; break;
 
 	case Kind::StringMethod: id += "stringmethod"; break;
+	case Kind::StringSubstr: id += "stringsubstr"; break;
 
 	case Kind::DecodeFunctionParams: id += "tvmslicedecodefunctionparams"; break;
 	case Kind::TVMSliceDataSize: id += "tvmslicedatasize"; break;
 	case Kind::TVMSliceDecode: id += "tvmslicedecode"; break;
 	case Kind::TVMSliceSize: id += "tvmslicesize"; break;
+	case Kind::TVMSliceSkip: id += "tvmsliceskip"; break;
+	case Kind::TVMSliceCompare: id += "tvmslicecompare"; break;
+	case Kind::TVMSliceHas: id += "tvmslicehasxxx"; break;
 
 	case Kind::TVMCellDepth: id += "tvmcelldepth"; break;
 	case Kind::TVMCellToSlice: id += "tvmcelltoslice"; break;
 	case Kind::TVMDataSize: id += "tvmdatasize"; break;
 	case Kind::TVMDataSizeQ: id += "tvmdatasizeq"; break;
 
-	case Kind::HexString: id += "hexstring"; break;
 	case Kind::Format: id += "format"; break;
 	case Kind::Stoi: id += "stoi"; break;
 	case Kind::LogTVM: id += "logtvm"; break;
 	case Kind::TVMAccept: id += "tvmaccept"; break;
+	case Kind::TVMBuildExtMsg: id += "tvmbuildextmsg"; break;
 	case Kind::TVMBuildStateInit: id += "tvmbuildstateinit"; break;
 
 	case Kind::TVMBuilderMethods: id += "tvmbuildermethods"; break;
@@ -2930,11 +2907,13 @@ string FunctionType::richIdentifier() const
 	case Kind::TVMFunctionId: id += "tvmfunctionid"; break;
 	case Kind::TVMHash: id += "tvmhash"; break;
 	case Kind::TVMLoadRef: id += "tvmloadref"; break;
+	case Kind::TVMLoadSlice: id += "tvmloadslice"; break;
 	case Kind::TVMPubkey: id += "tvmpubkey"; break;
 	case Kind::TVMRawConfigParam: id += "tvmrawconfigparam"; break;
 	case Kind::TVMResetStorage: id += "tvmresetstorage"; break;
 	case Kind::TVMSendMsg: id += "tvmsendmsg"; break;
 	case Kind::TVMSetcode: id += "tvmsetcode"; break;
+	case Kind::TVMDump: id += "tvmxxxdump"; break;
 	case Kind::TVMTransfer: id += "tvmtransfer"; break;
 	case Kind::TXtimestamp: id += "txtimestamp"; break;
 
@@ -2951,11 +2930,14 @@ string FunctionType::richIdentifier() const
 	case Kind::MathAbs: id += "mathabs"; break;
 	case Kind::MathDivC: id += "divc"; break;
 	case Kind::MathDivR: id += "divr"; break;
-	case Kind::MathMinOrMax: id += "mathminormax"; break;
+	case Kind::MathMin: id += "mathmin"; break;
+	case Kind::MathMax: id += "mathmax"; break;
 	case Kind::MathMinMax: id += "mathminmax"; break;
 	case Kind::MathModpow2: id += "mathmodpow2"; break;
 	case Kind::MathMulDiv: id += "mathmuldiv"; break;
 	case Kind::MathMulDivMod: id += "mathmuldivmod"; break;
+	case Kind::MathDivMod: id += "mathdivmod"; break;
+	case Kind::MathSign: id += "mathsign"; break;
 
 	case Kind::MappingAt: id += "mappingat"; break;
 	case Kind::MappingGetMinMax: id += "mapgetminmax"; break;
@@ -2998,6 +2980,8 @@ string FunctionType::richIdentifier() const
 	case Kind::BlockHash: id += "blockhash"; break;
 	case Kind::AddMod: id += "addmod"; break;
 	case Kind::MulMod: id += "mulmod"; break;
+	case Kind::ValueToGas: id += "valuetogas"; break;
+	case Kind::GasToValue: id += "gastovalue"; break;
 
 	case Kind::ArrayPush: id += "arraypush"; break;
 	case Kind::ArrayPop: id += "arraypop"; break;
@@ -3490,9 +3474,6 @@ string FunctionType::externalSignature() const
 	auto typeStrings = extParams.get() | boost::adaptors::transformed([&](TypePointer _t) -> string
 	{
 		string typeName = _t->signatureInExternalFunction(inLibrary);
-
-		if (inLibrary && _t->dataStoredIn(DataLocation::Storage))
-			typeName += " storage";
 		return typeName;
 	});
 	return m_declaration->name() + "(" + boost::algorithm::join(typeStrings, ",") + ")";
@@ -3526,6 +3507,10 @@ bool FunctionType::isPure() const
 		m_kind == Kind::ABIEncodeWithSignature ||
 		m_kind == Kind::ABIDecode ||
 		m_kind == Kind::MetaType ||
+
+		m_kind == Kind::AddressMakeAddrStd ||
+		m_kind == Kind::AddressMakeAddrNone ||
+
 		m_kind == Kind::TypeMakeAddr;
 }
 
@@ -3564,8 +3549,8 @@ FunctionTypePointer FunctionType::asCallableFunction(bool _inLibrary, bool _boun
 	for (auto const& t: m_parameterTypes)
 	{
 		auto refType = dynamic_cast<ReferenceType const*>(t);
-		if (refType && refType->location() == DataLocation::CallData)
-			parameterTypes.push_back(TypeProvider::withLocation(refType, DataLocation::Memory, true));
+		if (refType)
+			parameterTypes.push_back(TypeProvider::withLocation(refType, true));
 		else
 			parameterTypes.push_back(t);
 	}
@@ -3650,16 +3635,14 @@ BoolResult MappingType::isImplicitlyConvertibleTo(Type const& _other) const
 
 BoolResult OptionalType::isImplicitlyConvertibleTo(Type const& _other) const
 {
-	if (Type::isImplicitlyConvertibleTo(_other)) {
+	if (Type::isImplicitlyConvertibleTo(_other))
 		return true;
-	}
 
-	if (valueType()->isImplicitlyConvertibleTo(_other))
+	auto optOther = dynamic_cast<OptionalType const*>(&_other);
+	if (optOther != nullptr && isImplicitlyConvertibleTo(*optOther->valueType()))
 		return true;
-	if (_other.category() != category())
-		return false;
-	auto opt = dynamic_cast<OptionalType const*>(&_other);
-	return valueType()->isImplicitlyConvertibleTo(*opt->valueType());
+	bool r = *this == _other;
+	return r;
 }
 
 string MappingType::richIdentifier() const
@@ -3942,7 +3925,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 			{"value", TypeProvider::uint(128)},
 			{"data", TypeProvider::tvmslice()},
 			{"sig", TypeProvider::fixedBytes(4)},
-			{"currencies", TypeProvider::extraCurrencyCollection(DataLocation::Memory)},
+			{"currencies", TypeProvider::extraCurrencyCollection()},
 		});
 	case Kind::TVM: {
 		MemberList::MemberMap members = {
@@ -3950,12 +3933,12 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 			{"accept", TypeProvider::function(strings(), strings(), FunctionType::Kind::TVMAccept, false, StateMutability::Pure)},
 			{"commit", TypeProvider::function(strings(), strings(), FunctionType::Kind::TVMCommit, false, StateMutability::NonPayable)},
 			{"resetStorage", TypeProvider::function(strings(), strings(), FunctionType::Kind::TVMResetStorage, false, StateMutability::NonPayable)},
-			{"log", TypeProvider::function(strings{"bytes32"}, strings{}, FunctionType::Kind::LogTVM, false, StateMutability::Pure)},
+			{"log", TypeProvider::function(strings{"string"}, strings{}, FunctionType::Kind::LogTVM, false, StateMutability::Pure)},
 			{"exit", TypeProvider::function(strings{}, strings{}, FunctionType::Kind::TVMExit, false, StateMutability::Pure)},
 			{"exit1", TypeProvider::function(strings{}, strings{}, FunctionType::Kind::TVMExit1, false, StateMutability::Pure)}
 		};
 		members.emplace_back("rawReserve", TypeProvider::function(
-				TypePointers{TypeProvider::uint256(), TypeProvider::extraCurrencyCollection(DataLocation::Memory),  TypeProvider::uint256()},
+				TypePointers{TypeProvider::uint256(), TypeProvider::extraCurrencyCollection(),  TypeProvider::uint256()},
 				TypePointers{},
 				strings{string{}, string{}, string{}},
 				strings{},
@@ -3986,6 +3969,22 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				FunctionType::Kind::TVMSetcode,
 				false, StateMutability::Pure
 		));
+		members.emplace_back("bindump", TypeProvider::function(
+				TypePointers{TypeProvider::tvmcell()},
+				TypePointers{},
+				strings{string()},
+				strings{},
+				FunctionType::Kind::TVMDump,
+				false, StateMutability::Pure
+		));
+		members.emplace_back("hexdump", TypeProvider::function(
+				TypePointers{TypeProvider::tvmcell()},
+				TypePointers{},
+				strings{string()},
+				strings{},
+				FunctionType::Kind::TVMDump,
+				false, StateMutability::Pure
+		));
 		members.emplace_back("hash", TypeProvider::function(
 				TypePointers{TypeProvider::tvmcell()},
 				TypePointers{TypeProvider::uint256()},
@@ -3995,7 +3994,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				false, StateMutability::Pure
 		));
 		members.emplace_back("hash", TypeProvider::function(
-				TypePointers{TypeProvider::array(DataLocation::Memory, true)},
+				TypePointers{TypeProvider::array(true)},
 				TypePointers{TypeProvider::uint256()},
 				strings{string()},
 				strings{string()},
@@ -4053,20 +4052,50 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				false, StateMutability::Pure
 		));
 
+		members.emplace_back("buildExtMsg", TypeProvider::function(
+				TypePointers{TypeProvider::address(),
+							 TypeProvider::callList(),
+							 TypeProvider::uint(32),
+							 TypeProvider::uint(8),
+							 TypeProvider::uint(32),
+							 TypeProvider::uint(64),
+							 TypeProvider::uint(32),
+							 TypeProvider::optional(TypeProvider::uint256()),
+							 TypeProvider::boolean(),
+							 TypeProvider::tvmcell()},
+				TypePointers{TypeProvider::tvmcell()},
+				strings{string("dest"),			// mandatory
+						string("call"),			// mandatory
+						string("callbackId"),	// mandatory
+						string("abiVer"),		// mandatory
+						string("onErrorId"),	// mandatory
+						string("time"),			// can be omitted
+						string("expire"),		// can be omitted
+						string("pubkey"),		// can be omitted
+						string("sign"),			// can be omitted
+						string("stateInit")},	// can be omitted
+				strings{string()},
+				FunctionType::Kind::TVMBuildExtMsg,
+				true, StateMutability::Pure
+		));
+
 		members.emplace_back("buildStateInit", TypeProvider::function(
 				TypePointers{TypeProvider::tvmcell(),
 							 TypeProvider::tvmcell(),
 							 TypeProvider::uint(8),
 							 TypeProvider::initializerList(),
 							 TypeProvider::uint256(),
-							 TypeProvider::uint256()},
+							 //TypeProvider::contract(...) it's commented because we should set the concrete contract
+							 // but it can be any contract
+							 },
 				TypePointers{TypeProvider::tvmcell()},
 				strings{string("code"),	// mandatory
 						string("data"),	// conflicts with pubkey and varInit
 						string("splitDepth"),	// can be omitted
 						string("varInit"),	// conflicts with data
 						string("pubkey"),	// conflicts with data
-						string("contr")},
+						//string("contr")
+					},
 				strings{string()},
 				FunctionType::Kind::TVMBuildStateInit,
 				true, StateMutability::Pure
@@ -4134,7 +4163,11 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 			},
 			{
 				"shuffle",
-				TypeProvider::function({}, {}, {}, {}, FunctionType::Kind::RndShuffle, true, StateMutability::Pure)
+				TypeProvider::function({}, {}, {}, {}, FunctionType::Kind::RndShuffle, false, StateMutability::Pure)
+			},
+			{
+				"shuffle",
+				TypeProvider::function({TypeProvider::uint256()}, {}, {{}}, {}, FunctionType::Kind::RndShuffle, false, StateMutability::Pure)
 			}
 		};
 		return members;
@@ -4159,7 +4192,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				TypePointers{},
 				strings{},
 				strings{},
-				FunctionType::Kind::MathMinOrMax,
+				FunctionType::Kind::MathMax,
 				true, StateMutability::Pure
 		));
 		members.emplace_back("min", TypeProvider::function(
@@ -4167,7 +4200,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				TypePointers{},
 				strings{},
 				strings{},
-				FunctionType::Kind::MathMinOrMax,
+				FunctionType::Kind::MathMin,
 				true, StateMutability::Pure
 		));
 		members.emplace_back("minmax", TypeProvider::function(
@@ -4196,6 +4229,14 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				FunctionType::Kind::MathMulDivMod,
 				true, StateMutability::Pure
 		));
+		members.emplace_back("divmod", TypeProvider::function(
+				TypePointers{},
+				TypePointers{},
+				strings{},
+				strings{},
+				FunctionType::Kind::MathDivMod,
+				true, StateMutability::Pure
+		));
 		members.emplace_back("abs", TypeProvider::function(
 				TypePointers{},
 				TypePointers{},
@@ -4206,11 +4247,19 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 		));
 		members.emplace_back("modpow2", TypeProvider::function(
 				TypePointers{},
-				TypePointers{TypeProvider::uint(256)},
+				TypePointers{},
 				strings{},
-				strings{string()},
+				strings{},
 				FunctionType::Kind::MathModpow2,
 				true, StateMutability::Pure
+		));
+		members.emplace_back("sign", TypeProvider::function(
+				TypePointers{TypeProvider::integer(256, IntegerType::Modifier::Signed)},
+				TypePointers{TypeProvider::integer(8, IntegerType::Modifier::Signed)},
+				strings{string("value")},
+				strings{string("sign")},
+				FunctionType::Kind::MathSign,
+				false, StateMutability::Pure
 		));
 		return members;
 	}
@@ -4224,7 +4273,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 		return MemberList::MemberMap({
 			{"encode", TypeProvider::function(
 				TypePointers{},
-				TypePointers{TypeProvider::array(DataLocation::Memory)},
+				TypePointers{TypeProvider::array()},
 				strings{},
 				strings{1, ""},
 				FunctionType::Kind::ABIEncode,
@@ -4233,7 +4282,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 			)},
 			{"encodePacked", TypeProvider::function(
 				TypePointers{},
-				TypePointers{TypeProvider::array(DataLocation::Memory)},
+				TypePointers{TypeProvider::array()},
 				strings{},
 				strings{1, ""},
 				FunctionType::Kind::ABIEncodePacked,
@@ -4242,7 +4291,7 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 			)},
 			{"encodeWithSelector", TypeProvider::function(
 				TypePointers{TypeProvider::fixedBytes(4)},
-				TypePointers{TypeProvider::array(DataLocation::Memory)},
+				TypePointers{TypeProvider::array()},
 				strings{1, ""},
 				strings{1, ""},
 				FunctionType::Kind::ABIEncodeWithSelector,
@@ -4250,8 +4299,8 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 				StateMutability::Pure
 			)},
 			{"encodeWithSignature", TypeProvider::function(
-				TypePointers{TypeProvider::array(DataLocation::Memory, true)},
-				TypePointers{TypeProvider::array(DataLocation::Memory)},
+				TypePointers{TypeProvider::array(true)},
+				TypePointers{TypeProvider::array()},
 				strings{1, ""},
 				strings{1, ""},
 				FunctionType::Kind::ABIEncodeWithSignature,
@@ -4277,8 +4326,8 @@ MemberList::MemberMap MagicType::nativeMembers(ContractDefinition const*) const
 		ContractDefinition const& contract = dynamic_cast<ContractType const&>(*m_typeArgument).contractDefinition();
 		if (contract.canBeDeployed())
 			return MemberList::MemberMap({
-				{"creationCode", TypeProvider::array(DataLocation::Memory)},
-				{"runtimeCode", TypeProvider::array(DataLocation::Memory)},
+				{"creationCode", TypeProvider::array()},
+				{"runtimeCode", TypeProvider::array()},
 				{"name", TypeProvider::stringMemory()},
 				{"makeAddr", TypeProvider::function(
 						TypePointers{
@@ -4473,12 +4522,78 @@ MemberList::MemberMap TvmSliceType::nativeMembers(ContractDefinition const *) co
 			StateMutability::Pure
 	));
 
+	members.emplace_back("hasNBits", TypeProvider::function(
+			TypePointers{TypeProvider::uint(16)},
+			TypePointers{TypeProvider::boolean()},
+			strings{string()},
+			strings{string()},
+			FunctionType::Kind::TVMSliceHas,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("hasNRefs", TypeProvider::function(
+			TypePointers{TypeProvider::uint(8)},
+			TypePointers{TypeProvider::boolean()},
+			strings{string()},
+			strings{string()},
+			FunctionType::Kind::TVMSliceHas,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("hasNBitsAndRefs", TypeProvider::function(
+			TypePointers{TypeProvider::uint(16), TypeProvider::uint(8)},
+			TypePointers{TypeProvider::boolean()},
+			strings{string(), string()},
+			strings{string()},
+			FunctionType::Kind::TVMSliceHas,
+			false,
+			StateMutability::Pure
+	));
+
 	members.emplace_back("loadTons", TypeProvider::function(
 			TypePointers{},
 			TypePointers{TypeProvider::uint(128)},
 			strings{},
 			strings{string()},
 			FunctionType::Kind::TVMLoadRef,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("loadSlice", TypeProvider::function(
+			{TypeProvider::uint256()},
+			{TypeProvider::tvmslice()},
+			{{}},
+			{{}},
+			FunctionType::Kind::TVMLoadSlice,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("loadSlice", TypeProvider::function(
+			{TypeProvider::uint256(), TypeProvider::uint256()},
+			{TypeProvider::tvmslice()},
+			{{},{}},
+			{{}},
+			FunctionType::Kind::TVMLoadSlice,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("skip", TypeProvider::function(
+			strings{"uint"},
+			strings{},
+			FunctionType::Kind::TVMSliceSkip,
+			false,
+			StateMutability::Pure
+	));
+
+	members.emplace_back("skip", TypeProvider::function(
+			strings{"uint", "uint"},
+			strings{},
+			FunctionType::Kind::TVMSliceSkip,
 			false,
 			StateMutability::Pure
 	));
@@ -4534,6 +4649,15 @@ MemberList::MemberMap TvmSliceType::nativeMembers(ContractDefinition const *) co
 			strings{},
 			strings{string()},
 			FunctionType::Kind::TVMLoadRef,
+			false, StateMutability::Pure
+	));
+
+	members.emplace_back("compare", TypeProvider::function(
+			TypePointers{TypeProvider::tvmslice()},
+			TypePointers{TypeProvider::integer(8, IntegerType::Modifier::Signed)},
+			strings{string()},
+			strings{string()},
+			FunctionType::Kind::TVMSliceCompare,
 			false, StateMutability::Pure
 	));
 

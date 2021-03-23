@@ -1,4 +1,68 @@
-### 0.34 (2020-12-21)
+### 0.38.2 (2021-03-12)
+
+Bugfixes:
+ * Fixed minor bugs in TypeChecker.
+
+### 0.38.1 (2021-03-11)
+
+Bugfixes:
+ * Fix contract execution fail on internal message if the function returns some value.
+
+### 0.38 (2021-03-09)
+
+Breaking changes:
+ * Default value of parameter `flag` is equal to `0`. The parameter is used for `tvm.transfer` and
+external function calls.
+ * Introduce keyword `responsible` used to mark functions that can call a callback function.
+ * Change behavior for command line option `-o [ --output-dir ] path/to/dir` and introduce option
+`-f [ --file ] prefixName`.
+
+Bugfixes:
+ * Fixed minor bugs in TypeChecker that cause fails of the compiler.
+
+Use another opcodes for working with `mapping(KeyType => TvmSlice) map;` So if you used it then be
+sure that sum of bit length of `KeyType` and bit length of `TvmSlice` is less than 1023 bit.
+
+Documentation:
+ * Write about parameter `flag` used for `tvm.transfer` and external function calls. Add sample of
+`flag` usage.
+
+### 0.37 (2021-02-24)
+
+Compiler Features:
+ * Support fixed point numbers (`fixed` / `ufixed`).
+ * Support functions to convert gas to tons (`gasToValue()`) and vice versa (`valueToGas()`).
+ * Support `string` methods `byteLength()` and `substr()` to work with long strings (which are stored in more than one cell).
+ * Add methods `skip()`, `compare()`, `hasNBits()`, `hasNRefs()` and `hasNBitsAndRefs()` for TvmSlice type.
+ * Support proper `string` type comparison which works right with long strings.
+ * Removed deprecated function `hexstring()` and explicit int to string conversion.
+
+Bugfixes:
+ * Fixed a bug with slices comparison.
+
+### 0.36 (2021-02-04)
+
+Assorted features requested by DeBot support:
+ * `format` function now can create long strings (which does not fit one cell), can take string arguments and format integers width and fill settings.
+ * Some additional parameters were added for `tvm.buildExtMsg()` and `extMsg` call to support DeBot external function calls and deploy.
+
+### 0.35 (2021-02-01)
+
+Compiler Features:
+ * Support callback functions used for intercontract communication.
+ * Added **string** type method `append` that allows to concatenate long strings.
+ * Support function `sha256(TvmSlice slice) returns (uint256)`
+ * Added api function `tvm.buildExtMsg()` to generate an external inbound message to call contract function.
+ * Support constant variables of address type.
+
+Breaking changes:
+ * Use `pragma ton-solidity ...;` instead of `pragma solidity ...;` to restrict compiler version
+
+Bugfixes:
+ * Fixed an issue with modifier.
+ * Fixed a function type issue.
+
+### 0.34 (2020-12-30)
 
 Compiler Features:
  * Struct type can be used as a key of a mapping. Some restrictions are imposed on such structs.
@@ -8,6 +72,9 @@ Compiler Features:
 
 Breaking changes:
 * **fallback** function is not called on plain tons transfers if there is no receive function in the contract. In this case default **receive** function is called.
+
+Bugfixes:
+ * Fixed an issue with generating `*.abi.json` file.
 
 ### 0.33 (2020-11-18)
 

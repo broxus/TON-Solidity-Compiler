@@ -81,6 +81,14 @@ private:
 		bool _abiEncoderV2
 	);
 
+	void typeCheckTVMBuildStateInit(
+		FunctionCall const& _functionCall,
+		const std::function<bool(const std::string&)>& hasName,
+		const std::function<int(const std::string&)>& findName
+	);
+
+	void typeCheckCallBack(FunctionType const* remoteFunction, Expression const& option);
+
 	TypePointers typeCheckTVMSliceDecodeAndRetrieveReturnType(FunctionCall const& _functionCall);
 
 	TypePointers getReturnTypesForTVMConfig(FunctionCall const& _functionCall);
@@ -103,6 +111,7 @@ private:
 	void typeCheckConstructor(FunctionDefinition const& _function);
 	void typeCheckOnBounce(FunctionDefinition const& _function);
 	void typeCheckOnTickTock(FunctionDefinition const& _function);
+	void checkNeedCallback(FunctionType const * callee, ASTNode const& node);
 
 	/// Performs general number and type checks of arguments against function call and struct ctor FunctionCall node parameters.
 	void typeCheckFunctionGeneralChecks(
@@ -120,12 +129,23 @@ private:
 
 	static FunctionDefinition const* getFunctionDefinition(Expression const* expr);
 	static std::pair<bool, FunctionDefinition const*> getConstructorDefinition(Expression const* expr);
+	static ContractType const* getContractType(Expression const* expr);
+	FunctionDefinition const* checkPubFunctionAndGetDefinition(Expression const& arg, bool printError = false);
 	FunctionDefinition const* checkPubFunctionOrContractTypeAndGetDefinition(Expression const& arg);
+	void checkInitList(InitializerList const *list, ContractType const *ct);
 
 	void endVisit(InheritanceSpecifier const& _inheritance) override;
 	void endVisit(UsingForDirective const& _usingFor) override;
 	bool visit(StructDefinition const& _struct) override;
+	bool checkAbiType(
+		VariableDeclaration const* origVar,
+		Type const* curType,
+		int keyLength,
+		VariableDeclaration const* curVar,
+		std::set<StructDefinition const*>& usedStructs
+	);
 	bool visit(FunctionDefinition const& _function) override;
+	void endVisit(FunctionDefinition const& _function) override;
 	bool visit(VariableDeclaration const& _variable) override;
 	/// We need to do this manually because we want to pass the bases of the current contract in
 	/// case this is a base constructor call.
@@ -158,6 +178,7 @@ private:
 	void endVisit(MappingNameExpression const& _expr) override;
 	void endVisit(OptionalNameExpression const& _expr) override;
 	void endVisit(InitializerList const& _expr) override;
+	void endVisit(CallList const& _expr) override;
 	void endVisit(Literal const& _literal) override;
 	bool visit(Mapping const& _mapping) override;
 
@@ -178,6 +199,7 @@ private:
 	void requireLValue(Expression const& _expression);
 
 	ContractDefinition const* m_scope = nullptr;
+	FunctionDefinition const* m_currentFunction = nullptr;
 
 	langutil::EVMVersion m_evmVersion;
 

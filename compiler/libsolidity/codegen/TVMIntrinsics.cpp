@@ -68,20 +68,6 @@ bool IntrinsicsCompiler::checkTvmIntrinsic(FunctionCall const &_functionCall) {
 		}
 	};
 
-	if (iname == "tvm_logstr") {
-		auto logstr = arguments[0].get();
-		if (auto literal = to<Literal>(logstr)) {
-			if (literal->value().length() > 15)
-				cast_error(_functionCall, "tvm_logstr param should be no more than 15 chars");
-			if (TVMContractCompiler::g_without_logstr) {
-				return true;
-			}
-			m_pusher.push(0, "PRINTSTR " + literal->value());
-		} else {
-			cast_error(_functionCall, "tvm_logstr param should be literal");
-		}
-		return true;
-	}
 	if (iname == "tvm_ldu" || iname == "tvm_ldi")  {
 		auto slice = ensureParamIsIdentifier(0);
 		if (arguments.size() >= 3) {
@@ -258,16 +244,6 @@ bool IntrinsicsCompiler::checkTvmIntrinsic(FunctionCall const &_functionCall) {
 		m_pusher.push(-1+1, "BREMBITS");
 		return true;
 	}
-	if (iname == "tvm_getfromdict") {
-		// tvm_getfromdict(uint dict, uint nbits, uint idx)
-		// returns (uint /* slice */)
-		acceptExpr(arguments[2].get());
-		acceptExpr(arguments[0].get());
-		acceptExpr(arguments[1].get());
-		m_pusher.push(-3+2, "DICTUGET");
-		m_pusher.push(-1, "THROWIFNOT 10");
-		return true;
-	}
 	if (iname == "tvm_get_slice_from_integer_dict") {
 		acceptExpr(arguments[0].get());
 		acceptExpr(arguments[1].get());
@@ -319,20 +295,16 @@ bool IntrinsicsCompiler::checkTvmIntrinsic(FunctionCall const &_functionCall) {
 		m_pusher.push(+1,   "PUSHINT " + toString(TvmConst::C4::KeyLength));
 		return true;
 	}
-	if (iname == "tvm_exception_constructoriscalledtwice") {
-		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::Message::Exception::ConstructorIsCalledTwice));
-		return true;
-	}
 	if (iname == "tvm_exception_replayprotection") {
-		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::Message::Exception::ReplayProtection));
+		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::RuntimeException::ReplayProtection));
 		return true;
 	}
 	if (iname == "tvm_exception_unpackaddress") {
-		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::Message::Exception::AddressUnpackException));
+		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::RuntimeException::AddressUnpackException));
 		return true;
 	}
 	if (iname == "tvm_exception_insertpubkey") {
-		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::Message::Exception::InsertPubkeyException));
+		m_pusher.push(+1, "PUSHINT " + toString(TvmConst::RuntimeException::InsertPubkeyException));
 		return true;
 	}
 	if (iname == "tvm_default_replay_protection_interval"){
@@ -576,13 +548,6 @@ bool IntrinsicsCompiler::checkTvmIntrinsic(FunctionCall const &_functionCall) {
 		checkArgCount(1);
 		acceptExpr(arguments[0].get());
 		m_pusher.push(-1 + 1, opcode);
-		return true;
-	}
-	if (iname == "tvm_insert_pubkey") {
-		checkArgCount(2);
-		acceptExpr(arguments[0].get());
-		acceptExpr(arguments[1].get());
-		m_pusher.pushPrivateFunctionOrMacroCall(-2 + 1, "insert_pubkey_macro");
 		return true;
 	}
 	if (iname == "tvm_getparam") {
@@ -870,12 +835,6 @@ IF
 		return true;
 	}
 
-	if (iname == "tvm_commit") {
-		checkArgCount(0);
-		m_pusher.pushPrivateFunctionOrMacroCall(0, "c7_to_c4");
-		m_pusher.push(0, opcode);
-		return true;
-	}
 	if (iname == "tvm_getglob") {
 		auto literal = to<Literal>(arguments[0].get());
 		if (!literal) {
@@ -894,7 +853,7 @@ IF
 		return true;
 	}
 	if (iname == "tvm_migratePubkey") {
-		m_pusher.pushLines(R"(
+		std::string str = R"(
 DEPTH
 TUPLEVAR
 SETGLOB 8
@@ -903,7 +862,7 @@ PUSHCONT {
 	GETGLOB 2
 	PUSHINT 64
 	DICTUGET
-	THROWIFNOT 62
+	THROWIFNOT MigratePubkey
 	PLDU 256
 	SETGLOB 2
 }
@@ -914,8 +873,9 @@ TRY
 GETGLOB 8
 DUP
 TLEN
-UNTUPLEVAR
-)");
+UNTUPLEVAR)";
+		boost::replace_all(str, "MigratePubkey", toString(TvmConst::RuntimeException::MigratePubkey));
+		m_pusher.pushLines(str);
 		return true;
 	}
 	return false;
