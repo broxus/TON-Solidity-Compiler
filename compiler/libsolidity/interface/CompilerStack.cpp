@@ -874,15 +874,16 @@ StringMap CompilerStack::loadMissingSources(SourceUnit const& _ast, std::string 
 		{
 			solAssert(!import->path().empty(), "Import path cannot be empty.");
 
-			if (!boost::filesystem::exists(import->path())) {
+			auto importPath = boost::filesystem::canonical(import->path(),
+				boost::filesystem::path(_sourcePath).remove_filename()).string();
+
+			if (!boost::filesystem::exists(importPath)) {
 				m_errorReporter.parserError(
 					import->location(),
 					string("Source \"" + import->path() + "\" doesn't exist.")
 				);
 				continue;
 			}
-			string importPath = boost::filesystem::canonical(import->path(),
-				boost::filesystem::path(_sourcePath).remove_filename()).string();
 
 			// The current value of `path` is the absolute path as seen from this source file.
 			// We first have to apply remappings before we can store the actual absolute path
