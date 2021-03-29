@@ -13,7 +13,7 @@ Original Instructions about how to build and install the Solidity compiler can b
 ### Ubuntu Linux
 
 ```shell
-git clone git@github.com:tonlabs/TON-Solidity-Compiler.git
+git clone git@github.com:broxus/TON-Solidity-Compiler.git
 cd TON-Solidity-Compiler
 sh ./compiler/scripts/install_deps.sh
 mkdir build
@@ -34,7 +34,7 @@ Install Visual Studio, Git bash, cmake.
 Run Visual Studio Developer Command Prompt
 
 ```shell
-git clone https://github.com/tonlabs/TON-Solidity-Compiler
+git clone https://github.com/broxus/TON-Solidity-Compiler
 cd TON-Solidity-Compiler
 cmake -P compiler\scripts\install_deps.cmake
 mkdir build
