@@ -3553,16 +3553,32 @@ void TypeChecker::endVisit(NewExpression const& _newExpression)
 			m_errorReporter.typeError(_newExpression.location(), "Cannot instantiate an abstract contract.");
 
 		solAssert(!!m_scope, "");
-		m_scope->annotation().contractDependencies.insert(contract);
-		solAssert(
-			!contract->annotation().linearizedBaseContracts.empty(),
-			"Linearized base contracts not yet available."
-		);
-		if (contractDependenciesAreCyclic(*m_scope))
-			m_errorReporter.typeError(
-				_newExpression.location(),
-				"Circular reference for contract creation (cannot create instance of derived or same contract)."
+		auto newDependency = m_scope != contract;
+
+		if (newDependency)
+			for (const auto &baseContract : m_scope->baseContracts())
+			{
+				if (baseContract->name().annotation().contractScope == contract)
+				{
+					newDependency = false;
+					break;
+				}
+			}
+
+		if (newDependency)
+		{
+			m_scope->annotation().contractDependencies.insert(contract);
+			solAssert(
+				!contract->annotation().linearizedBaseContracts.empty(),
+				"Linearized base contracts not yet available."
 			);
+
+			if (contractDependenciesAreCyclic(*m_scope))
+				m_errorReporter.typeError(
+					_newExpression.location(),
+					"Circular reference for contract creation (cannot create instance of derived or same contract)."
+				);
+		}
 
 		_newExpression.annotation().type = FunctionType::newExpressionType(*contract);
 	}
