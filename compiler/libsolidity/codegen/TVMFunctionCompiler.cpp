@@ -210,7 +210,7 @@ void TVMFunctionCompiler::generateMacro(
 void TVMFunctionCompiler::generateOnCodeUpgrade(StackPusherHelper& pusher, FunctionDefinition const* function) {
 
 	pusher.generateInternal("onCodeUpgrade", 2);
-	pusher.switchSelector();
+	//pusher.switchSelector();
 
 	TVMFunctionCompiler funCompiler{pusher, 0, function, false, true, 0};
 	funCompiler.visitFunctionWithModifiers();
