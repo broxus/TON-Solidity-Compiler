@@ -1903,8 +1903,6 @@ bool FunctionCallCompiler::checkForTvmFunction(const MemberAccess &_node) {
 	} else if (_node.memberName() == "setCurrentCode") { // tvm.setCurrentCode
 		pushArgs();
 		m_pusher.push(-1+1, "CTOS");
-		m_pusher.push(0, "PLDREF");
-		m_pusher.push(0, "CTOS");
 		m_pusher.push(0, "BLESS");
 		m_pusher.push(-1, "POP c3");
 	} else if (_node.memberName() == "commit") { // tvm.commit
