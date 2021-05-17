@@ -327,6 +327,7 @@ TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclarati
 	pusher.generateMacro(vd->name());
 	pusher.pushMacroCallInCallRef(0, "c4_to_c7");
 
+	pusher.pushS(pusher.getStack().size());
 	pusher.push(-1 + 1, "EQINT -1"); // is it ext msg?
 	pusher.push(-1, ""); // fix stack
 
