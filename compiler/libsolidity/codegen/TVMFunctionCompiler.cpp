@@ -326,24 +326,37 @@ TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclarati
 	TVMFunctionCompiler funCompiler{pusher, nullptr};
 	pusher.generateMacro(vd->name());
 	pusher.pushMacroCallInCallRef(0, "c4_to_c7");
-	pusher.getGlob(vd);
-	const int prevStackSize = pusher.getStack().size();
-	const std::vector<VariableDeclaration const*> outputs = {vd};
-	auto appendBody = [&](int builderSize) {
-		return EncodeFunctionParams{&pusher}.createMsgBodyAndAppendToBuilder(
+
+	pusher.push(-1 + 1, "EQINT -1"); // is it ext msg?
+	pusher.push(-1, ""); // fix stack
+
+	// emit for ext
+	{
+		pusher.startContinuation();
+
+		pusher.getGlob(vd);
+		const int prevStackSize = pusher.getStack().size();
+		const std::vector<VariableDeclaration const*> outputs = {vd};
+		auto appendBody = [&](int builderSize) {
+			return EncodeFunctionParams{&pusher}.createMsgBodyAndAppendToBuilder(
 				[&](size_t idx) {
 					int pos = (pusher.getStack().size() - prevStackSize) +
-							  (static_cast<int>(1) - static_cast<int>(idx) - 1);
+						(static_cast<int>(1) - static_cast<int>(idx) - 1);
 					pusher.pushS(pos);
 				},
 				{vd},
 				EncodeFunctionParams{&pusher}.calculateFunctionIDWithReason(vd->name(), {}, &outputs, ReasonOfOutboundMessage::FunctionReturnExternal, {}, false),
 				{},
 				builderSize
-		);
-	};
+			);
+		};
 
-	pusher.sendMsg({}, {}, appendBody, nullptr, nullptr, StackPusherHelper::MsgType::ExternalOut);
+		pusher.sendMsg({}, {}, appendBody, nullptr, nullptr, StackPusherHelper::MsgType::ExternalOut);
+
+		pusher.endContinuation();
+	}
+
+	pusher.push(0, "IF");
 
 	pusher.push(0, "TRUE");
 	pusher.push(0, "SETGLOB 7");
