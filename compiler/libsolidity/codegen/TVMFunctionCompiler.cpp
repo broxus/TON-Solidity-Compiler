@@ -325,7 +325,8 @@ void
 TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclaration const* vd) {
 	TVMFunctionCompiler funCompiler{pusher, nullptr};
 	pusher.generateMacro(vd->name());
-	pusher.pushMacroCallInCallRef(0, "c4_to_c7");
+	pusher.push(+1, ""); // fix stack
+	pusher.drop(); // drop function id
 
 	pusher.pushS(pusher.getStack().size());
 	pusher.push(-1 + 1, "EQINT -1"); // is it ext msg?
