@@ -327,8 +327,10 @@ TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclarati
 	pusher.generateMacro(vd->name());
 	pusher.push(+1, ""); // fix stack
 	pusher.drop(); // drop function id
+	pusher.push(0, "ENDS");
 	pusher.pushMacroCallInCallRef(0, "c4_to_c7");
 
+	pusher.push( 0, ";; emitting 1 value");
 	pusher.pushS(pusher.getStack().size());
 	pusher.push(-1 + 1, "EQINT -1"); // is it ext msg?
 	pusher.push(-1, ""); // fix stack
@@ -338,6 +340,7 @@ TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclarati
 		pusher.startContinuation();
 
 		pusher.getGlob(vd);
+
 		const int prevStackSize = pusher.getStack().size();
 		const std::vector<VariableDeclaration const*> outputs = {vd};
 		auto appendBody = [&](int builderSize) {
@@ -360,6 +363,9 @@ TVMFunctionCompiler::generateGetter(StackPusherHelper &pusher, VariableDeclarati
 	}
 
 	pusher.push(0, "IF");
+
+	pusher.drop();
+	pusher.getStack().ensureSize(0, "");
 
 	pusher.push(0, "TRUE");
 	pusher.push(0, "SETGLOB 7");
