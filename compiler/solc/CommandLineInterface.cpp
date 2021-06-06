@@ -104,6 +104,7 @@ static string const g_strLicense = "license";
 static string const g_strNatspecDev = "devdoc";
 static string const g_strNatspecUser = "userdoc";
 static string const g_strOutputDir = "output-dir";
+static string const g_argSearchDir = "search-dir";
 static string const g_strFile = "file";
 
 static string const g_strVersion = "version";
@@ -232,7 +233,6 @@ bool CommandLineInterface::readInputFilesAndConfigureRemappings()
 				m_sourceCodes[infile.generic_string()] = readFileAsString(infile.string());
 				path = boost::filesystem::canonical(infile).string();
 			}
-			m_allowedDirectories.push_back(boost::filesystem::path(path).remove_filename());
 		}
 	}
 	if (m_sourceCodes.size() == 0)
@@ -242,6 +242,31 @@ bool CommandLineInterface::readInputFilesAndConfigureRemappings()
 	}
 
 	return true;
+}
+
+void CommandLineInterface::readSearchDirectories()
+{
+	if (m_args.count(g_argSearchDir) == 0) {
+		return;
+	}
+
+	auto directories = m_args[g_argSearchDir].as<std::vector<string>>();
+	for (const auto& item : directories) {
+		auto path = boost::filesystem::path(item);
+		if (!boost::filesystem::exists(path))
+		{
+			serr() << path << " is not found." << endl;
+			return;
+		}
+
+		if (!boost::filesystem::is_directory(path))
+		{
+			serr() << path << " is not a directory." << endl;
+			return;
+		}
+
+		m_searchDirectories.push_back(path);
+	}
 }
 
 bool CommandLineInterface::parseArguments(int _argc, char** _argv)
@@ -282,6 +307,11 @@ Allowed options)",
 			(g_argFile + ",f").c_str(),
 			po::value<string>()->value_name("prefixName"),
 			"Set prefix of names of output files (*.code and *abi.json)."
+		)
+		(
+			(g_argSearchDir + ",s").c_str(),
+			po::value<std::vector<string>>()->multitoken(),
+			"List of allowed search directories"
 		)
 		;
 	po::options_description outputComponents("Output Components");
@@ -399,6 +429,7 @@ bool CommandLineInterface::processInput()
 
 	if (!readInputFilesAndConfigureRemappings())
 		return false;
+	readSearchDirectories();
 
 	m_compiler = make_unique<CompilerStack>(fileReader);
 
@@ -410,6 +441,9 @@ bool CommandLineInterface::processInput()
 		if (m_args.count(g_argInputFile))
 			m_compiler->setRemappings(m_remappings);
 		m_compiler->setSources(m_sourceCodes);
+
+		if (m_args.count(g_argSearchDir))
+			m_compiler->setSearchDirectories(m_searchDirectories);
 
 		if (m_args.count(g_argTvmUnsavedStructs))
 			m_compiler->setStructWarning(true);

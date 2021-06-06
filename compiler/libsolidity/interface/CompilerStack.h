@@ -36,6 +36,7 @@
 #include <libsolutil/FixedHash.h>
 
 #include <boost/noncopyable.hpp>
+#include <boost/filesystem/path.hpp>
 #include <json/json.h>
 
 #include <functional>
@@ -122,6 +123,8 @@ public:
 	/// Sets path remappings.
 	/// Must be set before parsing.
 	void setRemappings(std::vector<Remapping> const& _remappings);
+
+	void setSearchDirectories(std::vector<boost::filesystem::path> searchDirectories);
 
 	/// Sets library addresses. Addresses are cleared iff @a _libraries is missing.
 	/// Must be set before parsing.
@@ -445,6 +448,7 @@ private:
 	langutil::EVMVersion m_evmVersion;
 	// smt::SMTSolverChoice m_enabledSMTSolvers;
 	std::map<std::string, std::set<std::string>> m_requestedContractNames;
+	std::vector<boost::filesystem::path> m_searchDirectories;
 	bool m_generateIR;
 	bool m_generateEwasm;
 	std::map<std::string, util::h160> m_libraries;

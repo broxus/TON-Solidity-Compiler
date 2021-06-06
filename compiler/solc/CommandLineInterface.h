@@ -75,6 +75,10 @@ private:
 
 	/// Fills @a m_sourceCodes initially and @a m_redirects.
 	bool readInputFilesAndConfigureRemappings();
+
+	/// Fills @a m_searchDirectories
+	void readSearchDirectories();
+
 	/// Tries to read from the file @a _input or interprets _input literally if that fails.
 	/// It then tries to parse the contents and appends to m_libraries.
 //	bool parseLibraryOption(std::string const& _input);
@@ -107,8 +111,8 @@ private:
 	std::map<std::string, std::string> m_sourceCodes;
 	/// list of remappings
 	std::vector<frontend::CompilerStack::Remapping> m_remappings;
-	/// list of allowed directories to read files from
-	std::vector<boost::filesystem::path> m_allowedDirectories;
+	/// list of directories to use when searching files
+	std::vector<boost::filesystem::path> m_searchDirectories;
 	/// map of library names to addresses
 	std::map<std::string, util::h160> m_libraries;
 	/// Solidity compiler stack

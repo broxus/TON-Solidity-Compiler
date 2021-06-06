@@ -119,6 +119,11 @@ void CompilerStack::setRemappings(vector<Remapping> const& _remappings)
 	m_remappings = _remappings;
 }
 
+void CompilerStack::setSearchDirectories(std::vector<boost::filesystem::path> searchDirectories)
+{
+	m_searchDirectories = searchDirectories;
+}
+
 void CompilerStack::setEVMVersion(langutil::EVMVersion _version)
 {
 	if (m_stackState >= ParsingPerformed)
@@ -874,10 +879,28 @@ StringMap CompilerStack::loadMissingSources(SourceUnit const& _ast, std::string 
 		{
 			solAssert(!import->path().empty(), "Import path cannot be empty.");
 
-			auto importPath = boost::filesystem::canonical(import->path(),
-				boost::filesystem::path(_sourcePath).remove_filename()).string();
+			auto importPath = _sourcePath;
+			auto importFound = false;
+			try {
+				importPath = boost::filesystem::canonical(import->path(),
+					boost::filesystem::path(_sourcePath).remove_filename()).string();
+				importFound = boost::filesystem::exists(importPath);
+			} catch(...) {
+				for (const auto &searchDirectory : m_searchDirectories) {
+					if (importFound) {
+						break;
+					}
 
-			if (!boost::filesystem::exists(importPath)) {
+					try {
+						importPath = boost::filesystem::canonical(import->path(), searchDirectory).string();
+						importFound = boost::filesystem::exists(importPath);
+					} catch(...) {
+						continue;
+					}
+				}
+			}
+
+			if (!importFound) {
 				m_errorReporter.parserError(
 					import->location(),
 					string("Source \"" + import->path() + "\" doesn't exist.")
